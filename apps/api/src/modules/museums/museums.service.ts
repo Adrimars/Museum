@@ -5,6 +5,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 
+import type { Prisma } from '@prisma/client';
+
 import type { JwtPayload } from '../../common/decorators/current-user.decorator';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { CreateMuseumDto } from './dto/create-museum.dto';
@@ -150,8 +152,8 @@ export class MuseumsService {
       data: {
         name: dto.name,
         slug: dto.slug,
-        description: dto.description,
-        logoUrl: dto.logoUrl,
+        description: dto.description ?? null,
+        logoUrl: dto.logoUrl ?? null,
         address: dto.address as object,
         settings: DEFAULT_SETTINGS,
         isActive: false, // museums start inactive per PRD §12.3
@@ -206,7 +208,7 @@ export class MuseumsService {
         ...(dto.description !== undefined && { description: dto.description }),
         ...(dto.logoUrl !== undefined && { logoUrl: dto.logoUrl }),
         ...(dto.address !== undefined && { address: dto.address as object }),
-        ...(mergedSettings !== undefined && { settings: mergedSettings }),
+        ...(mergedSettings !== undefined && { settings: mergedSettings as Prisma.InputJsonValue }),
       },
     });
   }

@@ -6,10 +6,11 @@ import { Strategy, type Profile, type VerifyCallback } from 'passport-google-oau
 @Injectable()
 export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
   constructor(config: ConfigService) {
+    const clientID = config.get<string>('auth.googleClientId', '');
     super({
-      clientID: config.get<string>('auth.googleClientId', ''),
-      clientSecret: config.get<string>('auth.googleClientSecret', ''),
-      callbackURL: config.get<string>('auth.googleCallbackUrl', ''),
+      clientID: clientID || 'google-oauth-not-configured',
+      clientSecret: config.get<string>('auth.googleClientSecret', '') || 'google-oauth-not-configured',
+      callbackURL: config.get<string>('auth.googleCallbackUrl', 'http://localhost:3000/api/v1/auth/google/callback'),
       scope: ['email', 'profile'],
     });
   }

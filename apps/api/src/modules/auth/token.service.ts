@@ -54,7 +54,7 @@ export class TokenService {
         jti,
         userId,
         tokenHash,
-        deviceHint: deviceHint?.slice(0, 255),
+        deviceHint: deviceHint?.slice(0, 255) ?? null,
         expiresAt,
         isRevoked: false,
       },

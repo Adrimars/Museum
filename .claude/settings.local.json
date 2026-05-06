@@ -5,7 +5,9 @@
       "Bash(git commit *)",
       "Bash(node_modules/.bin/tsc --noEmit)",
       "Bash(npm run *)",
-      "Bash(npm audit *)"
+      "Bash(npm audit *)",
+      "Bash(npx nest *)",
+      "Bash(echo \"Exit code: $?\")"
     ]
   }
 }
