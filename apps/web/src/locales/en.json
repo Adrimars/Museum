@@ -1,0 +1,24 @@
+{
+  "app": {
+    "name": "MuseumQuest",
+    "tagline": "Transform your museum visit into an adventure"
+  },
+  "auth": {
+    "login": "Log In",
+    "register": "Sign Up",
+    "logout": "Log Out",
+    "email": "Email",
+    "password": "Password",
+    "displayName": "Display Name",
+    "dateOfBirth": "Date of Birth",
+    "forgotPassword": "Forgot Password",
+    "noAccount": "Don't have an account?",
+    "hasAccount": "Already have an account?"
+  },
+  "errors": {
+    "required": "This field is required",
+    "invalidEmail": "Please enter a valid email address",
+    "passwordTooShort": "Password must be at least 8 characters",
+    "generic": "Something went wrong, please try again"
+  }
+}
