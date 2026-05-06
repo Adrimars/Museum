@@ -23,6 +23,7 @@ import { CurrentUser, type JwtPayload } from '../../common/decorators/current-us
 import { Public } from '../../common/decorators/public.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+
 import { CreateMuseumDto } from './dto/create-museum.dto';
 import { ListMuseumsDto } from './dto/list-museums.dto';
 import { UpdateMuseumDto } from './dto/update-museum.dto';
@@ -99,5 +100,33 @@ export class MuseumsController {
   @ApiResponse({ status: 404, description: 'Museum not found.' })
   remove(@Param('id', ParseUUIDPipe) id: string) {
     return this.museumsService.remove(id);
+  }
+
+  // ── Activate museum (super_admin only) ─────────────────────────────────
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @Roles('super_admin')
+  @Patch(':id/activate')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Activate a museum (super_admin only)' })
+  @ApiResponse({ status: 200, description: 'Museum activated.' })
+  @ApiResponse({ status: 404, description: 'Museum not found.' })
+  activate(@Param('id', ParseUUIDPipe) id: string) {
+    return this.museumsService.activate(id);
+  }
+
+  // ── Deactivate museum (super_admin only) ────────────────────────────────
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @Roles('super_admin')
+  @Patch(':id/deactivate')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Deactivate a museum (super_admin only)' })
+  @ApiResponse({ status: 200, description: 'Museum deactivated.' })
+  @ApiResponse({ status: 404, description: 'Museum not found.' })
+  deactivate(@Param('id', ParseUUIDPipe) id: string) {
+    return this.museumsService.deactivate(id);
   }
 }

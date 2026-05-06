@@ -1,18 +1,20 @@
-import { ValidationPipe, VersioningType } from '@nestjs/common';
+import { Logger, ValidationPipe, VersioningType } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
+import { WINSTON_MODULE_NEST_PROVIDER } from 'nest-winston';
 
 import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { RequestIdInterceptor } from './common/interceptors/request-id.interceptor';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 
+const bootstrapLogger = new Logger('Bootstrap');
+
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, {
-    logger: ['error', 'warn', 'log', 'debug', 'verbose'],
-  });
+  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  app.useLogger(app.get(WINSTON_MODULE_NEST_PROVIDER));
 
   app.use(helmet());
   app.use(cookieParser());
@@ -55,11 +57,11 @@ async function bootstrap() {
 
   const port = process.env['PORT'] ?? 3000;
   await app.listen(port);
-  console.log(`MuseumQuest API running on http://localhost:${port}/api/v1`);
-  console.log(`Swagger docs available at http://localhost:${port}/api/docs`);
+  bootstrapLogger.log(`MuseumQuest API running on http://localhost:${port}/api/v1`);
+  bootstrapLogger.log(`Swagger docs available at http://localhost:${port}/api/docs`);
 }
 
 bootstrap().catch((err) => {
-  console.error('Failed to start application:', err);
+  bootstrapLogger.error('Failed to start application', err);
   process.exit(1);
 });

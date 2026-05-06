@@ -4,11 +4,12 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-
 import type { Prisma } from '@prisma/client';
 
 import type { JwtPayload } from '../../common/decorators/current-user.decorator';
+import { ErrorCode } from '../../common/errors/error-codes';
 import { PrismaService } from '../../prisma/prisma.service';
+
 import type { CreateMuseumDto } from './dto/create-museum.dto';
 import type { ListMuseumsDto } from './dto/list-museums.dto';
 import type { UpdateMuseumDto } from './dto/update-museum.dto';
@@ -103,13 +104,14 @@ export class MuseumsService {
 
     const hasMore = museums.length > limit;
     const items = hasMore ? museums.slice(0, limit) : museums;
+    const lastItem = items.at(-1);
 
     const nextCursor =
-      hasMore && items.length > 0
+      hasMore && lastItem
         ? Buffer.from(
             JSON.stringify({
-              createdAt: items[items.length - 1]!.createdAt.toISOString(),
-              id: items[items.length - 1]!.id,
+              createdAt: lastItem.createdAt.toISOString(),
+              id: lastItem.id,
             }),
           ).toString('base64')
         : null;
@@ -127,7 +129,7 @@ export class MuseumsService {
     if (!museum) {
       throw new NotFoundException({
         message: 'Museum not found.',
-        errorCode: 'MUSEUM_NOT_FOUND',
+        errorCode: ErrorCode.MUSEUM_NOT_FOUND,
       });
     }
 
@@ -144,7 +146,7 @@ export class MuseumsService {
     if (existing) {
       throw new ConflictException({
         message: 'A museum with this slug already exists.',
-        errorCode: 'MUSEUM_SLUG_EXISTS',
+        errorCode: ErrorCode.MUSEUM_SLUG_EXISTS,
       });
     }
 
@@ -171,14 +173,14 @@ export class MuseumsService {
     if (!museum) {
       throw new NotFoundException({
         message: 'Museum not found.',
-        errorCode: 'MUSEUM_NOT_FOUND',
+        errorCode: ErrorCode.MUSEUM_NOT_FOUND,
       });
     }
 
     if (actor.role === 'museum_admin' && actor.museumId !== id) {
       throw new ForbiddenException({
         message: 'You can only update your own museum.',
-        errorCode: 'FORBIDDEN',
+        errorCode: ErrorCode.FORBIDDEN,
       });
     }
 
@@ -189,7 +191,7 @@ export class MuseumsService {
       if (slugConflict) {
         throw new ConflictException({
           message: 'A museum with this slug already exists.',
-          errorCode: 'MUSEUM_SLUG_EXISTS',
+          errorCode: ErrorCode.MUSEUM_SLUG_EXISTS,
         });
       }
     }
@@ -223,7 +225,7 @@ export class MuseumsService {
     if (!museum) {
       throw new NotFoundException({
         message: 'Museum not found.',
-        errorCode: 'MUSEUM_NOT_FOUND',
+        errorCode: ErrorCode.MUSEUM_NOT_FOUND,
       });
     }
 
@@ -233,5 +235,45 @@ export class MuseumsService {
     });
 
     return { message: 'Museum soft-deleted.' };
+  }
+
+  // ── Activate (super_admin) ──────────────────────────────────────────────
+
+  async activate(id: string) {
+    const museum = await this.prisma.museum.findFirst({
+      where: { id, deletedAt: null },
+    });
+
+    if (!museum) {
+      throw new NotFoundException({
+        message: 'Museum not found.',
+        errorCode: ErrorCode.MUSEUM_NOT_FOUND,
+      });
+    }
+
+    return this.prisma.museum.update({
+      where: { id },
+      data: { isActive: true },
+    });
+  }
+
+  // ── Deactivate (super_admin) ────────────────────────────────────────────
+
+  async deactivate(id: string) {
+    const museum = await this.prisma.museum.findFirst({
+      where: { id, deletedAt: null },
+    });
+
+    if (!museum) {
+      throw new NotFoundException({
+        message: 'Museum not found.',
+        errorCode: ErrorCode.MUSEUM_NOT_FOUND,
+      });
+    }
+
+    return this.prisma.museum.update({
+      where: { id },
+      data: { isActive: false },
+    });
   }
 }

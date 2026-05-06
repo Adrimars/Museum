@@ -19,6 +19,8 @@ import {
 import { Request, Response } from 'express';
 
 import { Public } from '../../common/decorators/public.decorator';
+import { ThrottleGroup } from '../../common/decorators/throttle-group.decorator';
+
 import { AuthService } from './auth.service';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { LoginDto } from './dto/login.dto';
@@ -43,6 +45,7 @@ export class AuthController {
   @Public()
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
+  @ThrottleGroup('auth')
   @ApiOperation({ summary: 'Register a new visitor account' })
   @ApiResponse({ status: 201, description: 'Account created, tokens issued.' })
   @ApiResponse({ status: 409, description: 'Email already exists.' })
@@ -61,6 +64,7 @@ export class AuthController {
   @Public()
   @Post('login')
   @HttpCode(HttpStatus.OK)
+  @ThrottleGroup('auth')
   @ApiOperation({ summary: 'Authenticate with email and password' })
   @ApiResponse({ status: 200, description: 'Authenticated.' })
   @ApiResponse({ status: 401, description: 'Invalid credentials.' })
@@ -129,6 +133,7 @@ export class AuthController {
   @Public()
   @Post('forgot-password')
   @HttpCode(HttpStatus.OK)
+  @ThrottleGroup('auth')
   @ApiOperation({ summary: 'Request a password reset email' })
   @ApiResponse({ status: 200, description: 'Email sent if account exists (always 200).' })
   async forgotPassword(@Body() dto: ForgotPasswordDto) {

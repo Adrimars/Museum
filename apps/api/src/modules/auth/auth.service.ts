@@ -1,19 +1,22 @@
+import { createHash, randomBytes } from 'crypto';
+
 import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { UserRole } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
-import { createHash, randomBytes } from 'crypto';
-import { createTransport } from 'nodemailer';
 import Redis from 'ioredis';
+import { createTransport } from 'nodemailer';
 
+import { ErrorCode } from '../../common/errors/error-codes';
 import { ApiException } from '../../common/exceptions/api.exception';
 import { PrismaService } from '../../prisma/prisma.service';
 import { REDIS_CLIENT } from '../../redis/redis.module';
-import { TokenService } from './token.service';
+
 import type { ForgotPasswordDto } from './dto/forgot-password.dto';
 import type { LoginDto } from './dto/login.dto';
 import type { RegisterDto } from './dto/register.dto';
 import type { ResetPasswordDto } from './dto/reset-password.dto';
+import { TokenService } from './token.service';
 
 export interface AuthTokens {
   accessToken: string;
@@ -42,7 +45,7 @@ export class AuthService {
     if (existing) {
       throw new ApiException(
         'An account with this email already exists.',
-        'AUTH_EMAIL_EXISTS',
+        ErrorCode.AUTH_EMAIL_EXISTS,
         HttpStatus.CONFLICT,
       );
     }
@@ -78,7 +81,7 @@ export class AuthService {
     if (!user) {
       throw new ApiException(
         'Invalid email or password.',
-        'AUTH_INVALID_CREDENTIALS',
+        ErrorCode.AUTH_INVALID_CREDENTIALS,
         HttpStatus.UNAUTHORIZED,
       );
     }
@@ -89,7 +92,7 @@ export class AuthService {
     if (!user.passwordHash) {
       throw new ApiException(
         'This account uses social login. Please sign in with Google.',
-        'AUTH_INVALID_CREDENTIALS',
+        ErrorCode.AUTH_INVALID_CREDENTIALS,
         HttpStatus.UNAUTHORIZED,
       );
     }
@@ -100,7 +103,7 @@ export class AuthService {
       await this.incrementLoginAttempts(user.id);
       throw new ApiException(
         'Invalid email or password.',
-        'AUTH_INVALID_CREDENTIALS',
+        ErrorCode.AUTH_INVALID_CREDENTIALS,
         HttpStatus.UNAUTHORIZED,
       );
     }
@@ -108,7 +111,7 @@ export class AuthService {
     if (user.isBanned) {
       throw new ApiException(
         'Your account has been suspended.',
-        'AUTH_ACCOUNT_BANNED',
+        ErrorCode.AUTH_ACCOUNT_BANNED,
         HttpStatus.FORBIDDEN,
       );
     }
@@ -128,7 +131,7 @@ export class AuthService {
     if (!result) {
       throw new ApiException(
         'Invalid or expired refresh token.',
-        'AUTH_TOKEN_INVALID',
+        ErrorCode.AUTH_TOKEN_INVALID,
         HttpStatus.UNAUTHORIZED,
       );
     }
@@ -140,7 +143,7 @@ export class AuthService {
     if (!user || user.isBanned) {
       throw new ApiException(
         'Auth token is no longer valid.',
-        'AUTH_TOKEN_INVALID',
+        ErrorCode.AUTH_TOKEN_INVALID,
         HttpStatus.UNAUTHORIZED,
       );
     }
@@ -211,7 +214,7 @@ export class AuthService {
     if (!stored) {
       throw new ApiException(
         'Password reset token is invalid or has expired.',
-        'AUTH_RESET_TOKEN_INVALID',
+        ErrorCode.AUTH_RESET_TOKEN_INVALID,
         HttpStatus.BAD_REQUEST,
       );
     }
@@ -251,7 +254,7 @@ export class AuthService {
         // Account exists with a password — do NOT auto-merge
         throw new ApiException(
           'An account with this email already exists. Please sign in with your email and password.',
-          'AUTH_EMAIL_EXISTS_DIFFERENT_PROVIDER',
+          ErrorCode.AUTH_EMAIL_EXISTS_DIFFERENT_PROVIDER,
           HttpStatus.CONFLICT,
         );
       }
@@ -310,7 +313,7 @@ export class AuthService {
     if (attempts && parseInt(attempts, 10) >= maxAttempts) {
       throw new ApiException(
         'Account is temporarily locked due to too many failed login attempts. Try again in 15 minutes.',
-        'AUTH_ACCOUNT_LOCKED',
+        ErrorCode.AUTH_ACCOUNT_LOCKED,
         HttpStatus.TOO_MANY_REQUESTS,
       );
     }
