@@ -1,7 +1,7 @@
 import { HttpStatus } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
-import { UserRole } from '@prisma/client';
+import { Prisma, UserRole } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
 import { ApiException } from '../../common/exceptions/api.exception';
@@ -86,6 +86,27 @@ describe('AuthService', () => {
           email: 'test@example.com',
           password: 'Test@1234',
           displayName: 'Test User',
+          dateOfBirth: '1995-01-01',
+        }),
+      ).rejects.toMatchObject({
+        response: { errorCode: 'AUTH_EMAIL_EXISTS' },
+        status: HttpStatus.CONFLICT,
+      });
+    });
+
+    it('returns 409 when a concurrent registration wins the unique-constraint race', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(null); // check passes
+      const p2002 = new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+        code: 'P2002',
+        clientVersion: '5.0.0',
+      });
+      mockPrisma.user.create.mockRejectedValue(p2002);
+
+      await expect(
+        service.register({
+          email: 'race@example.com',
+          password: 'Test@1234',
+          displayName: 'Race User',
           dateOfBirth: '1995-01-01',
         }),
       ).rejects.toMatchObject({

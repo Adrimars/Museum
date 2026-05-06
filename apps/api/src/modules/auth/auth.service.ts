@@ -2,7 +2,7 @@ import { createHash, randomBytes } from 'crypto';
 
 import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { UserRole } from '@prisma/client';
+import { Prisma, UserRole } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import Redis from 'ioredis';
 import { createTransport } from 'nodemailer';
@@ -53,20 +53,33 @@ export class AuthService {
     const bcryptCost = this.config.get<number>('auth.bcryptCostFactor', 12);
     const passwordHash = await bcrypt.hash(dto.password, bcryptCost);
 
-    const user = await this.prisma.user.create({
-      data: {
-        email: dto.email,
-        passwordHash,
-        displayName: dto.displayName,
-        dateOfBirth: new Date(dto.dateOfBirth),
-        role: UserRole.user,
-        preferences: {
-          language: 'tr',
-          preferredDifficulty: 'medium',
-          accessibility: { reducedMotion: false, highContrast: false },
+    let user: { id: string; role: UserRole; museumId: string | null };
+    try {
+      user = await this.prisma.user.create({
+        data: {
+          email: dto.email,
+          passwordHash,
+          displayName: dto.displayName,
+          dateOfBirth: new Date(dto.dateOfBirth),
+          role: UserRole.user,
+          preferences: {
+            language: 'tr',
+            preferredDifficulty: 'medium',
+            accessibility: { reducedMotion: false, highContrast: false },
+          },
         },
-      },
-    });
+      });
+    } catch (err) {
+      // Concurrent registration with the same email won the race — surface as 409
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        throw new ApiException(
+          'An account with this email already exists.',
+          ErrorCode.AUTH_EMAIL_EXISTS,
+          HttpStatus.CONFLICT,
+        );
+      }
+      throw err;
+    }
 
     return this.buildTokens(user.id, user.role, user.museumId, deviceHint);
   }
