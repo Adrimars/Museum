@@ -44,7 +44,9 @@ export default function MuseumsPage() {
   const { data, isLoading, isError } = useQuery({
     queryKey: ['museums'],
     queryFn: () =>
-      api.get<{ data: Museum[] }>('/museums').then((r) => r.data.data),
+      api
+        .get<{ data: { data: Museum[]; cursor: string | null; hasMore: boolean } }>('/museums')
+        .then((r) => r.data.data.data),
   });
 
   const table = useReactTable({

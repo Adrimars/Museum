@@ -63,9 +63,13 @@ export class UsersService {
     let cursorPayload: { createdAt: string; id: string } | null = null;
     if (dto.cursor) {
       try {
-        cursorPayload = JSON.parse(
+        const parsed = JSON.parse(
           Buffer.from(dto.cursor, 'base64').toString('utf8'),
         ) as { createdAt: string; id: string };
+        const date = new Date(parsed.createdAt);
+        if (parsed.id && !isNaN(date.getTime())) {
+          cursorPayload = parsed;
+        }
       } catch {
         cursorPayload = null;
       }

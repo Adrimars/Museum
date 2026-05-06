@@ -51,7 +51,9 @@ export default function UsersPage() {
   const { data, isLoading, isError } = useQuery({
     queryKey: ['users'],
     queryFn: () =>
-      api.get<{ data: User[] }>('/users').then((r) => r.data.data),
+      api
+        .get<{ data: { data: User[]; cursor: string | null; hasMore: boolean } }>('/users')
+        .then((r) => r.data.data.data),
   });
 
   const table = useReactTable({
