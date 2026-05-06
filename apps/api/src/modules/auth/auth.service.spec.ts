@@ -220,6 +220,28 @@ describe('AuthService', () => {
         status: HttpStatus.BAD_REQUEST,
       });
     });
+
+    it('throws BAD_REQUEST when Redis value is corrupt (non-JSON)', async () => {
+      mockRedis.get.mockResolvedValue('not-valid-json{{');
+
+      await expect(
+        service.resetPassword({ token: 'sometoken', newPassword: 'New@Pass1234' }),
+      ).rejects.toMatchObject({
+        response: { errorCode: 'AUTH_RESET_TOKEN_INVALID' },
+        status: HttpStatus.BAD_REQUEST,
+      });
+    });
+
+    it('throws BAD_REQUEST when Redis value is JSON but missing userId', async () => {
+      mockRedis.get.mockResolvedValue(JSON.stringify({ email: 'orphaned@example.com' }));
+
+      await expect(
+        service.resetPassword({ token: 'sometoken', newPassword: 'New@Pass1234' }),
+      ).rejects.toMatchObject({
+        response: { errorCode: 'AUTH_RESET_TOKEN_INVALID' },
+        status: HttpStatus.BAD_REQUEST,
+      });
+    });
   });
 
   describe('handleGoogleCallback', () => {

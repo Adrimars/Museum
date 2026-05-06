@@ -232,7 +232,26 @@ export class AuthService {
       );
     }
 
-    const { userId } = JSON.parse(stored) as { userId: string };
+    let parsed: { userId?: unknown };
+    try {
+      parsed = JSON.parse(stored) as { userId?: unknown };
+    } catch {
+      throw new ApiException(
+        'Password reset token is invalid or has expired.',
+        ErrorCode.AUTH_RESET_TOKEN_INVALID,
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    if (!parsed.userId || typeof parsed.userId !== 'string') {
+      throw new ApiException(
+        'Password reset token is invalid or has expired.',
+        ErrorCode.AUTH_RESET_TOKEN_INVALID,
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const { userId } = parsed as { userId: string };
     const bcryptCost = this.config.get<number>('auth.bcryptCostFactor', 12);
     const passwordHash = await bcrypt.hash(dto.newPassword, bcryptCost);
 
