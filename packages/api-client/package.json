@@ -7,7 +7,7 @@
   "types": "./src/index.ts",
   "scripts": {
     "generate": "openapi-typescript http://localhost:3000/api/docs-json -o src/schema.d.ts",
-    "lint": "eslint src --ext .ts",
+    "lint": "eslint src",
     "type-check": "tsc --noEmit"
   },
   "dependencies": {

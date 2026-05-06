@@ -10,7 +10,7 @@
     "lint": "eslint src",
     "type-check": "tsc --noEmit",
     "test": "vitest run",
-    "test:ci": "vitest run --coverage",
+    "test:ci": "vitest run --coverage --passWithNoTests",
     "test:watch": "vitest"
   },
   "dependencies": {
