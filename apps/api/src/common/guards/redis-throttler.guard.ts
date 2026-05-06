@@ -7,19 +7,6 @@ import Redis from 'ioredis';
 import { REDIS_CLIENT } from '../../redis/redis.module';
 import { THROTTLE_GROUP_KEY, type ThrottleGroupName } from '../decorators/throttle-group.decorator';
 
-function decodeJwtSub(authHeader?: string): string | null {
-  try {
-    const token = authHeader?.split(' ')[1];
-    if (!token) return null;
-    const part = token.split('.')[1];
-    if (!part) return null;
-    const payload = JSON.parse(Buffer.from(part, 'base64url').toString()) as { sub?: string };
-    return payload.sub ?? null;
-  } catch {
-    return null;
-  }
-}
-
 interface GroupLimits {
   limit: number;
   windowMs: number;
@@ -41,9 +28,11 @@ export class RedisThrottlerGuard implements CanActivate {
       [context.getHandler(), context.getClass()],
     );
 
-    const userId = decodeJwtSub(req.headers.authorization);
-    const effectiveGroup: ThrottleGroupName = group ?? (userId ? 'authenticated' : 'public');
-    const fingerprint = userId ?? req.ip ?? 'unknown';
+    // Fingerprint by IP only — never decode an unverified JWT here.
+    // The JwtAuthGuard runs after global APP_GUARDs so req.user is not yet
+    // populated; trusting raw Authorization header bytes allows sub-forgery.
+    const fingerprint = req.ip ?? 'unknown';
+    const effectiveGroup: ThrottleGroupName = group ?? 'public';
 
     const { limit, windowMs } = this.getLimits(effectiveGroup);
     const key = `rl:${fingerprint}:${effectiveGroup}`;
