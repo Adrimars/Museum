@@ -1,0 +1,49 @@
+{
+  "name": "@museumquest/web",
+  "version": "1.0.0",
+  "private": true,
+  "description": "MuseumQuest visitor-facing PWA",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "lint": "eslint src",
+    "type-check": "tsc --noEmit",
+    "test": "vitest run",
+    "test:ci": "vitest run --coverage",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@museumquest/api-client": "*",
+    "@museumquest/ui": "*",
+    "@tanstack/react-query": "^5.59.0",
+    "axios": "^1.7.7",
+    "framer-motion": "^11.11.0",
+    "html5-qrcode": "^2.3.8",
+    "i18next": "^23.16.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-hook-form": "^7.53.0",
+    "react-i18next": "^15.0.3",
+    "react-router-dom": "^6.27.0",
+    "socket.io-client": "^4.8.0",
+    "zustand": "^5.0.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@museumquest/config": "*",
+    "@types/react": "^18.3.11",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.2",
+    "@vitest/coverage-v8": "^3.0.0",
+    "jsdom": "^25.0.1",
+    "tailwindcss": "^3.4.14",
+    "tailwindcss-animate": "^1.0.7",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.47",
+    "typescript": "^5.6.3",
+    "vite": "^6.0.0",
+    "vite-plugin-pwa": "^0.21.0",
+    "vitest": "^3.0.0"
+  }
+}

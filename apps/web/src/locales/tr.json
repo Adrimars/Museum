@@ -1,0 +1,24 @@
+{
+  "app": {
+    "name": "MuseumQuest",
+    "tagline": "Müze ziyaretini maceraya dönüştür"
+  },
+  "auth": {
+    "login": "Giriş Yap",
+    "register": "Kayıt Ol",
+    "logout": "Çıkış Yap",
+    "email": "E-posta",
+    "password": "Şifre",
+    "displayName": "Görünen Ad",
+    "dateOfBirth": "Doğum Tarihi",
+    "forgotPassword": "Şifremi Unuttum",
+    "noAccount": "Hesabın yok mu?",
+    "hasAccount": "Zaten hesabın var mı?"
+  },
+  "errors": {
+    "required": "Bu alan zorunludur",
+    "invalidEmail": "Geçerli bir e-posta adresi girin",
+    "passwordTooShort": "Şifre en az 8 karakter olmalıdır",
+    "generic": "Bir hata oluştu, lütfen tekrar deneyin"
+  }
+}

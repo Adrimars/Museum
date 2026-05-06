@@ -1,0 +1,21 @@
+{
+  "name": "@museumquest/api-client",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Type-safe API client generated from OpenAPI spec",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "generate": "openapi-typescript http://localhost:3000/api/docs-json -o src/schema.d.ts",
+    "lint": "eslint src",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "axios": "^1.7.7"
+  },
+  "devDependencies": {
+    "@museumquest/config": "*",
+    "openapi-typescript": "^7.4.0",
+    "typescript": "^5.6.3"
+  }
+}
