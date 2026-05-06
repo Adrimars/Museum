@@ -68,11 +68,11 @@ export class TokenService {
   ): Promise<{ userId: string; jti: string } | null> {
     const tokenHash = createHash('sha256').update(rawToken).digest('hex');
 
-    const record = await this.prisma.refreshToken.findFirst({
-      where: { tokenHash, isRevoked: false },
+    const record = await this.prisma.refreshToken.findUnique({
+      where: { tokenHash },
     });
 
-    if (!record) return null;
+    if (!record || record.isRevoked) return null;
     if (record.expiresAt < new Date()) return null;
 
     // Check Redis blocklist
