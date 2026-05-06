@@ -1,9 +1,10 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 
 import { ErrorCode } from '../../common/errors/error-codes';
 import { PrismaService } from '../../prisma/prisma.service';
 
+import type { AssignRoleDto } from './dto/assign-role.dto';
 import type { ListUsersDto } from './dto/list-users.dto';
 import type { UpdateProfileDto } from './dto/update-profile.dto';
 
@@ -135,6 +136,63 @@ export class UsersService {
         ...(dto.displayName !== undefined && { displayName: dto.displayName }),
         ...(dto.avatarUrl !== undefined && { avatarUrl: dto.avatarUrl }),
         ...(mergedPreferences !== undefined && { preferences: mergedPreferences as Prisma.InputJsonValue }),
+      },
+      select: USER_SAFE_SELECT,
+    });
+  }
+
+  // ── PATCH /users/:id/role (super_admin only) ─────────────────────────────
+
+  async assignRole(targetId: string, actorId: string, dto: AssignRoleDto) {
+    // Prevent self-role changes to avoid accidental lockout
+    if (targetId === actorId) {
+      throw new BadRequestException({
+        message: 'You cannot change your own role.',
+        errorCode: ErrorCode.USER_ROLE_ESCALATION_FORBIDDEN,
+      });
+    }
+
+    const target = await this.prisma.user.findFirst({
+      where: { id: targetId, deletedAt: null },
+      select: { id: true },
+    });
+
+    if (!target) {
+      throw new NotFoundException({
+        message: 'User not found.',
+        errorCode: ErrorCode.USER_NOT_FOUND,
+      });
+    }
+
+    // museumId required for museum_admin / content_editor; cleared for user
+    const requiresMuseum = dto.role === 'museum_admin' || dto.role === 'content_editor';
+
+    if (requiresMuseum && !dto.museumId) {
+      throw new BadRequestException({
+        message: `museumId is required when assigning role "${dto.role}".`,
+        errorCode: ErrorCode.VALIDATION_ERROR,
+      });
+    }
+
+    if (requiresMuseum && dto.museumId) {
+      const museum = await this.prisma.museum.findFirst({
+        where: { id: dto.museumId, deletedAt: null },
+        select: { id: true },
+      });
+
+      if (!museum) {
+        throw new NotFoundException({
+          message: 'Museum not found.',
+          errorCode: ErrorCode.MUSEUM_NOT_FOUND,
+        });
+      }
+    }
+
+    return this.prisma.user.update({
+      where: { id: targetId },
+      data: {
+        role: dto.role,
+        museumId: requiresMuseum ? (dto.museumId ?? null) : null,
       },
       select: USER_SAFE_SELECT,
     });
