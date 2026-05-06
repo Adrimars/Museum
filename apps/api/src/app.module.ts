@@ -2,8 +2,8 @@ import { BullModule } from '@nestjs/bull';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
-import { ThrottlerModule } from '@nestjs/throttler';
 
+import { RedisThrottlerGuard } from './common/guards/redis-throttler.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { LoggerModule } from './common/logger/logger.module';
@@ -25,19 +25,6 @@ import { RedisModule } from './redis/redis.module';
       load: [appConfig, authConfig, databaseConfig, redisConfig],
       envFilePath: ['.env.local', '.env'],
     }),
-    ThrottlerModule.forRootAsync({
-      imports: [ConfigModule],
-      inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        throttlers: [
-          {
-            name: 'public',
-            ttl: 60_000,
-            limit: config.get('app.rateLimitPublic', 100),
-          },
-        ],
-      }),
-    }),
     BullModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
@@ -58,6 +45,10 @@ import { RedisModule } from './redis/redis.module';
     UsersModule,
   ],
   providers: [
+    {
+      provide: APP_GUARD,
+      useClass: RedisThrottlerGuard,
+    },
     {
       provide: APP_GUARD,
       useClass: RolesGuard,
