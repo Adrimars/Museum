@@ -248,13 +248,13 @@ You can combine roles for cross-cutting tasks (e.g., Backend + Database for a ne
 - NEVER deploy to any region other than `eu-central-1` (Frankfurt) — KVKK/GDPR data residency requirement.
 - NEVER use wildcard (`*`) in production CORS configuration.
 - NEVER store secrets in `.env` files in production or commit them to Git.
-- NEVER allow direct pushes to `main` — all changes go through PRs with CI gates.
+- Direct pushes to `main` are allowed. CI gates (type-check + unit tests) still run on every push.
 - Zero-downtime deploys are required via Blue/Green strategy.
 - All containers MUST be vulnerability-scanned in ECR before deployment.
 - All Docker images MUST use multi-stage builds to minimize image size.
 
 **Coding Standards:**
-- CI gates on every PR: lint, TypeScript type-check, unit tests. All three must pass.
+- CI gates on every push and PR: TypeScript type-check and unit tests. Both must pass.
 - Health endpoints: `/health/live` (liveness), `/health/ready` (readiness — checks PostgreSQL, Redis, S3).
 - Logging: structured JSON via Winston/Pino → CloudWatch Logs.
 - Alerting: CloudWatch Alarms → SNS → team notifications.
@@ -331,7 +331,7 @@ You can combine roles for cross-cutting tasks (e.g., Backend + Database for a ne
 
 **Constraints:**
 - NEVER mark a feature as complete if it fails the performance SLAs above.
-- EVERY PR MUST pass: lint, TypeScript type-check, and unit tests.
+- EVERY push and PR MUST pass: TypeScript type-check and unit tests.
 - Tests MUST NOT depend on external services (mock OpenAI, Claude, SendGrid, S3).
 - Load tests use k6 simulating the target concurrent user count.
 

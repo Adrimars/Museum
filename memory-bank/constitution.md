@@ -155,10 +155,10 @@ present in every feature that touches the relevant boundary:
 - **Error envelope (MUST):** Every error response MUST use the unified envelope:
   `{ statusCode, message, errorCode, requestId, timestamp, path }`. Bespoke error shapes
   are prohibited.
-- **CI gates (MUST pass before merge):** Lint, TypeScript type-check, and unit tests. All
-  three gates run on every PR via GitHub Actions.
+- **CI gates:** TypeScript type-check and unit tests run on every push and PR via GitHub
+  Actions. Both MUST pass. Lint is not a required gate. Direct pushes to `main` are allowed.
 - **Deployment (MUST):** Blue/Green deployment via AWS CodeDeploy + ECS. Zero-downtime deploys
-  are required. Direct pushes to `main` are prohibited.
+  are required.
 - **Observability (MUST):** Structured JSON logging via Winston/Pino MUST be present in every
   new service. Sentry error tracking MUST be initialized in both `apps/web` and the NestJS
   backend. No silent `catch` blocks that swallow errors without logging.

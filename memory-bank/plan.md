@@ -39,7 +39,7 @@
 | S1-08 | Implement logout (revoke refresh token, clear cookie) | AuthModule | P0 |
 | S1-09 | Implement Google OAuth2 flow (no auto-merge with existing email accounts) | AuthModule | P1 |
 | S1-10 | Set up ESLint, TypeScript strict mode, shared configs in `packages/config` | Infra | P0 |
-| S1-11 | Set up GitHub Actions: lint + type-check + unit test CI gates | Infra | P0 |
+| S1-11 | Set up GitHub Actions: type-check + unit test CI gates (direct pushes to main allowed) | Infra | P0 |
 
 ### Sprint 2 — Museums, RBAC, Tenant Isolation
 

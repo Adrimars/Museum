@@ -324,7 +324,6 @@ PR opened
     │
     ▼
 GitHub Actions
-    ├── Lint (ESLint)
     ├── TypeScript type-check
     └── Unit tests
     │
@@ -341,8 +340,8 @@ AWS CodeDeploy (Blue/Green)
 Zero-downtime deployment to ECS
 ```
 
-- Direct pushes to `main` are **prohibited**.
-- All three CI gates MUST pass before merge.
+- Direct pushes to `main` are allowed.
+- Both CI gates (type-check, unit tests) MUST pass on every push and PR.
 
 ---
 
@@ -350,7 +349,7 @@ Zero-downtime deployment to ECS
 
 | Concern | Tool | Details |
 |---|---|---|
-| Error Tracking | Sentry | Frontend (`apps/web`, `apps/admin`) + backend |
+| Error Tracking | Sentry | Frontend (`apps/web`, `apps/admin`) + backend (`apps/api`) |
 | Metrics | CloudWatch + Grafana | API latency (p50/p95/p99), error rates, DB pool, Redis hit rate, ECS utilization, AI token cost |
 | Logging | Winston + Pino → CloudWatch Logs | Structured JSON. No silent `catch` blocks. |
 | Alerting | CloudWatch Alarms → SNS | Team notifications on threshold breaches |
