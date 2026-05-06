@@ -5,6 +5,7 @@ import { ThrottlerModule } from '@nestjs/throttler';
 
 import { AuthModule } from './modules/auth/auth.module';
 import { HealthModule } from './modules/health/health.module';
+import { MuseumsModule } from './modules/museums/museums.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { RedisModule } from './redis/redis.module';
 import appConfig from './config/app.config';
@@ -47,6 +48,7 @@ import redisConfig from './config/redis.config';
     RedisModule,
     HealthModule,
     AuthModule,
+    MuseumsModule,
   ],
 })
 export class AppModule {}
