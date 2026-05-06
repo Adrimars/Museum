@@ -12,6 +12,7 @@ import redisConfig from './config/redis.config';
 import { AuthModule } from './modules/auth/auth.module';
 import { HealthModule } from './modules/health/health.module';
 import { MuseumsModule } from './modules/museums/museums.module';
+import { UsersModule } from './modules/users/users.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { RedisModule } from './redis/redis.module';
 
@@ -51,6 +52,7 @@ import { RedisModule } from './redis/redis.module';
     HealthModule,
     AuthModule,
     MuseumsModule,
+    UsersModule,
   ],
   providers: [
     {
