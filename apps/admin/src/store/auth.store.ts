@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 
 import { api } from '@/lib/api';
+import { tokenRegistry } from '@/lib/token-registry';
 
 export interface AuthUser {
   id: string;
@@ -27,17 +28,19 @@ export const useAuthStore = create<AuthState>()(
       isAuthenticated: false,
 
       login: async (credentials) => {
-        const { data } = await api.post<{ accessToken: string }>('/auth/login', credentials);
-        set({ accessToken: data.accessToken, isAuthenticated: true });
+        const { data: envelope } = await api.post<{ data: { accessToken: string } }>('/auth/login', credentials);
+        tokenRegistry.setToken(envelope.data.accessToken);
+        set({ accessToken: envelope.data.accessToken, isAuthenticated: true });
         try {
-          const { data: user } = await api.get<AuthUser>('/users/me');
-          set({ user });
+          const { data: profileEnvelope } = await api.get<{ data: AuthUser }>('/users/me');
+          set({ user: profileEnvelope.data });
         } catch {
           // Non-fatal — token is set, profile load can fail silently
         }
       },
 
       logout: async () => {
+        tokenRegistry.setToken(null);
         set({ user: null, accessToken: null, isAuthenticated: false });
         try {
           await api.post('/auth/logout');
@@ -46,7 +49,10 @@ export const useAuthStore = create<AuthState>()(
         }
       },
 
-      clearAuth: () => set({ user: null, accessToken: null, isAuthenticated: false }),
+      clearAuth: () => {
+        tokenRegistry.setToken(null);
+        set({ user: null, accessToken: null, isAuthenticated: false });
+      },
     }),
     {
       name: 'admin-auth',
@@ -56,6 +62,14 @@ export const useAuthStore = create<AuthState>()(
         accessToken: state.accessToken,
         isAuthenticated: state.isAuthenticated,
       }),
+      onRehydrateStorage: () => (state) => {
+        if (state?.accessToken) {
+          tokenRegistry.setToken(state.accessToken);
+        }
+      },
     },
   ),
 );
+
+// Wire up clearAuth handler for 401 responses
+tokenRegistry.setClearAuth(() => useAuthStore.getState().clearAuth());
