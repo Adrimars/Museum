@@ -3,8 +3,10 @@ import type { Prisma } from '@prisma/client';
 
 import { ErrorCode } from '../../common/errors/error-codes';
 import { PrismaService } from '../../prisma/prisma.service';
+import { TokenService } from '../auth/token.service';
 
 import type { AssignRoleDto } from './dto/assign-role.dto';
+import type { BanUserDto } from './dto/ban-user.dto';
 import type { ListUsersDto } from './dto/list-users.dto';
 import type { UpdateProfileDto } from './dto/update-profile.dto';
 
@@ -26,7 +28,10 @@ const USER_SAFE_SELECT = {
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly tokenService: TokenService,
+  ) {}
 
   // ── GET /me ─────────────────────────────────────────────────────────────
 
@@ -196,5 +201,107 @@ export class UsersService {
       },
       select: USER_SAFE_SELECT,
     });
+  }
+
+  // ── POST /users/:id/ban ──────────────────────────────────────────────────
+
+  async banUser(
+    targetId: string,
+    actor: { id: string; role: string },
+    dto: BanUserDto,
+    ipAddress: string,
+  ) {
+    const target = await this.prisma.user.findFirst({
+      where: { id: targetId, deletedAt: null },
+      select: { id: true, isBanned: true },
+    });
+
+    if (!target) {
+      throw new NotFoundException({
+        message: 'User not found.',
+        errorCode: ErrorCode.USER_NOT_FOUND,
+      });
+    }
+
+    if (target.isBanned) {
+      throw new BadRequestException({
+        message: 'User is already banned.',
+        errorCode: ErrorCode.VALIDATION_ERROR,
+      });
+    }
+
+    // Revoke all active tokens — blocks Redis JTIs + marks DB rows revoked
+    await this.tokenService.revokeAllUserRefreshTokens(targetId);
+
+    const [user] = await Promise.all([
+      this.prisma.user.update({
+        where: { id: targetId },
+        data: { isBanned: true },
+        select: USER_SAFE_SELECT,
+      }),
+      this.prisma.auditLog.create({
+        data: {
+          actorId: actor.id,
+          actorRole: actor.role,
+          action: 'USER_BANNED',
+          targetType: 'user',
+          targetId,
+          museumId: null,
+          metadata: { reason: dto.reason ?? null },
+          ipAddress,
+        },
+      }),
+    ]);
+
+    return user;
+  }
+
+  // ── DELETE /users/:id/ban ────────────────────────────────────────────────
+
+  async unbanUser(
+    targetId: string,
+    actor: { id: string; role: string },
+    ipAddress: string,
+  ) {
+    const target = await this.prisma.user.findFirst({
+      where: { id: targetId, deletedAt: null },
+      select: { id: true, isBanned: true },
+    });
+
+    if (!target) {
+      throw new NotFoundException({
+        message: 'User not found.',
+        errorCode: ErrorCode.USER_NOT_FOUND,
+      });
+    }
+
+    if (!target.isBanned) {
+      throw new BadRequestException({
+        message: 'User is not banned.',
+        errorCode: ErrorCode.VALIDATION_ERROR,
+      });
+    }
+
+    const [user] = await Promise.all([
+      this.prisma.user.update({
+        where: { id: targetId },
+        data: { isBanned: false },
+        select: USER_SAFE_SELECT,
+      }),
+      this.prisma.auditLog.create({
+        data: {
+          actorId: actor.id,
+          actorRole: actor.role,
+          action: 'USER_UNBANNED',
+          targetType: 'user',
+          targetId,
+          museumId: null,
+          metadata: {},
+          ipAddress,
+        },
+      }),
+    ]);
+
+    return user;
   }
 }

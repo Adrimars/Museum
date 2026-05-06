@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 
 import { CurrentUser, type JwtPayload } from '../../common/decorators/current-user.decorator';
@@ -6,6 +6,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
 import { AssignRoleDto } from './dto/assign-role.dto';
+import { BanUserDto } from './dto/ban-user.dto';
 import { ListUsersDto } from './dto/list-users.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { UsersService } from './users.service';
@@ -47,6 +48,52 @@ export class UsersController {
   @ApiResponse({ status: 200, description: 'Updated user profile.' })
   updateProfile(@CurrentUser() user: JwtPayload, @Body() dto: UpdateProfileDto) {
     return this.usersService.updateProfile(user.sub, dto);
+  }
+
+  // ── POST /users/:id/ban (super_admin only) ──────────────────────────────
+
+  @Post(':id/ban')
+  @HttpCode(HttpStatus.OK)
+  @Roles('super_admin')
+  @ApiOperation({ summary: 'Ban a user and revoke all their tokens (super_admin only)' })
+  @ApiResponse({ status: 200, description: 'User banned.' })
+  @ApiResponse({ status: 400, description: 'User is already banned.' })
+  @ApiResponse({ status: 403, description: 'Insufficient role.' })
+  @ApiResponse({ status: 404, description: 'User not found.' })
+  banUser(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() actor: JwtPayload,
+    @Body() dto: BanUserDto,
+    @Req() req: { ip: string },
+  ) {
+    return this.usersService.banUser(
+      id,
+      { id: actor.sub, role: actor.role },
+      dto,
+      req.ip,
+    );
+  }
+
+  // ── DELETE /users/:id/ban (super_admin only) ─────────────────────────────
+
+  @Delete(':id/ban')
+  @HttpCode(HttpStatus.OK)
+  @Roles('super_admin')
+  @ApiOperation({ summary: 'Unban a user (super_admin only)' })
+  @ApiResponse({ status: 200, description: 'User unbanned.' })
+  @ApiResponse({ status: 400, description: 'User is not banned.' })
+  @ApiResponse({ status: 403, description: 'Insufficient role.' })
+  @ApiResponse({ status: 404, description: 'User not found.' })
+  unbanUser(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() actor: JwtPayload,
+    @Req() req: { ip: string },
+  ) {
+    return this.usersService.unbanUser(
+      id,
+      { id: actor.sub, role: actor.role },
+      req.ip,
+    );
   }
 
   // ── PATCH /users/:id/role (super_admin only) ─────────────────────────────
