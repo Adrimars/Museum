@@ -148,7 +148,7 @@ present in every feature that touches the relevant boundary:
 ## Development Workflow & Quality Gates
 
 - **Monorepo:** The project MUST use the established Turborepo structure:
-  `apps/web`, `apps/admin`, `packages/ui`, `packages/api-client`, `packages/config`,
+  `apps/web`, `apps/admin`, `apps/api`, `packages/ui`, `packages/api-client`, `packages/config`,
   `prisma/`. New top-level directories require team consensus.
 - **API versioning (MUST):** All endpoints MUST be under `/api/v1/`. Introducing `/api/v2/`
   requires a formal deprecation plan.

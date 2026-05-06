@@ -99,7 +99,8 @@ Clear internal boundaries enable individual modules to be extracted into indepen
 /
 ├── apps/
 │   ├── web/               # Visitor-facing PWA (React + Capacitor)
-│   └── admin/             # Museum & system admin dashboards
+│   ├── admin/             # Museum & system admin dashboards
+│   └── api/               # NestJS backend (all modules)
 ├── packages/
 │   ├── ui/                # Shared component library (shadcn/ui)
 │   ├── api-client/        # Auto-generated TypeScript client from OpenAPI

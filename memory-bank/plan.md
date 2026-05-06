@@ -29,7 +29,7 @@
 
 | ID | Task | Module | Priority |
 |---|---|---|---|
-| S1-01 | Initialize Turborepo monorepo structure (`apps/web`, `apps/admin`, `packages/*`) | Infra | P0 |
+| S1-01 | Initialize Turborepo monorepo structure (`apps/web`, `apps/admin`, `apps/api`, `packages/*`) | Infra | P0 |
 | S1-02 | Configure Docker Compose: PostgreSQL 16 (pgvector, pg_trgm, TimescaleDB) + Redis 7 | Infra | P0 |
 | S1-03 | Set up Prisma schema with all 17 tables (initial migration) | Database | P0 |
 | S1-04 | Seed script: default museum settings JSONB, super_admin account | Database | P0 |
