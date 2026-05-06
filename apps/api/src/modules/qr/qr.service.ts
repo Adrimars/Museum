@@ -2,6 +2,7 @@ import { createHmac, createHash, timingSafeEqual } from 'node:crypto';
 
 import {
   BadRequestException,
+  ForbiddenException,
   GoneException,
   Injectable,
   Logger,
@@ -11,6 +12,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import * as QRCode from 'qrcode';
 
+import type { JwtPayload } from '../../common/decorators/current-user.decorator';
 import { ErrorCode } from '../../common/errors/error-codes';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
@@ -155,13 +157,20 @@ export class QrService {
 
   // ── Deactivate a QR code (PRD §8.4.4) ────────────────────────────────────
 
-  async deactivate(id: string) {
+  async deactivate(id: string, actor: JwtPayload) {
     const qr = await this.prisma.qrCode.findUnique({ where: { id } });
 
     if (!qr) {
       throw new NotFoundException({
         message: 'QR code not found.',
         errorCode: ErrorCode.QR_NOT_FOUND,
+      });
+    }
+
+    if (actor.role !== 'super_admin' && actor.museumId !== qr.museumId) {
+      throw new ForbiddenException({
+        message: 'You can only manage QR codes within your own museum.',
+        errorCode: ErrorCode.FORBIDDEN,
       });
     }
 

@@ -1,4 +1,4 @@
-import { BadRequestException, GoneException, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, GoneException, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 
@@ -161,17 +161,33 @@ describe('QrService', () => {
 
   // ── deactivate ─────────────────────────────────────────────────────────────
 
+  const museumAdmin = { sub: 'user-1', role: 'museum_admin' as const, museumId: MUSEUM_ID, iat: 0, exp: 0 };
+  const otherAdmin  = { sub: 'user-2', role: 'museum_admin' as const, museumId: 'cccccccc-cccc-cccc-cccc-cccccccccccc', iat: 0, exp: 0 };
+  const superAdmin  = { sub: 'user-3', role: 'super_admin'  as const, museumId: null as unknown as string, iat: 0, exp: 0 };
+
   describe('deactivate', () => {
     it('throws 404 for non-existent QR id', async () => {
       mockPrisma.qrCode.findUnique.mockResolvedValue(null);
-      await expect(service.deactivate('no-such-id')).rejects.toThrow(NotFoundException);
+      await expect(service.deactivate('no-such-id', museumAdmin)).rejects.toThrow(NotFoundException);
     });
 
-    it('sets isActive to false', async () => {
-      mockPrisma.qrCode.findUnique.mockResolvedValue({ id: 'qr-1', isActive: true });
+    it('throws 403 when museum_admin tries to deactivate a QR from a different museum', async () => {
+      mockPrisma.qrCode.findUnique.mockResolvedValue({ id: 'qr-1', museumId: MUSEUM_ID, isActive: true });
+      await expect(service.deactivate('qr-1', otherAdmin)).rejects.toThrow(ForbiddenException);
+    });
+
+    it('sets isActive to false for the owning museum_admin', async () => {
+      mockPrisma.qrCode.findUnique.mockResolvedValue({ id: 'qr-1', museumId: MUSEUM_ID, isActive: true });
       mockPrisma.qrCode.update.mockResolvedValue({ id: 'qr-1', isActive: false });
-      await service.deactivate('qr-1');
+      await service.deactivate('qr-1', museumAdmin);
       expect(mockPrisma.qrCode.update).toHaveBeenCalledWith({ where: { id: 'qr-1' }, data: { isActive: false } });
+    });
+
+    it('super_admin can deactivate any museum QR code', async () => {
+      mockPrisma.qrCode.findUnique.mockResolvedValue({ id: 'qr-1', museumId: MUSEUM_ID, isActive: true });
+      mockPrisma.qrCode.update.mockResolvedValue({ id: 'qr-1', isActive: false });
+      await service.deactivate('qr-1', superAdmin);
+      expect(mockPrisma.qrCode.update).toHaveBeenCalled();
     });
   });
 });

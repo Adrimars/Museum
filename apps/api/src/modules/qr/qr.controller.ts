@@ -17,6 +17,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 
+import { CurrentUser, type JwtPayload } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -64,8 +65,12 @@ export class QrController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Deactivate a QR code (scans return 410 Gone)' })
   @ApiResponse({ status: 200, description: 'QR code deactivated.' })
+  @ApiResponse({ status: 403, description: 'QR code belongs to a different museum.' })
   @ApiResponse({ status: 404, description: 'Not found.' })
-  deactivate(@Param('id', ParseUUIDPipe) id: string) {
-    return this.qrService.deactivate(id);
+  deactivate(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() actor: JwtPayload,
+  ) {
+    return this.qrService.deactivate(id, actor);
   }
 }
