@@ -4,6 +4,8 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bull';
+import type { Queue } from 'bull';
 import { Prisma } from '@prisma/client';
 
 import type { JwtPayload } from '../../common/decorators/current-user.decorator';
@@ -11,7 +13,7 @@ import { ErrorCode } from '../../common/errors/error-codes';
 import { PrismaService } from '../../prisma/prisma.service';
 import { QrService } from '../qr/qr.service';
 import type { CreateArtifactDto } from './dto/create-artifact.dto';
-import { EmbeddingService } from './embedding.service';
+import { EmbeddingService, ARTIFACT_EMBEDDING_QUEUE, type ArtifactEmbeddingJob } from './embedding.service';
 import type { ListArtifactsDto } from './dto/list-artifacts.dto';
 import type { UpdateArtifactDto } from './dto/update-artifact.dto';
 
@@ -26,6 +28,7 @@ export class ArtifactsService {
     private readonly prisma: PrismaService,
     private readonly qrService: QrService,
     private readonly embeddingService: EmbeddingService,
+    @InjectQueue(ARTIFACT_EMBEDDING_QUEUE) private readonly embeddingQueue: Queue<ArtifactEmbeddingJob>,
   ) {}
 
   // ── Paginated list with optional pg_trgm search (PRD §8.3.1) ──────────────
@@ -178,10 +181,11 @@ export class ArtifactsService {
       this.logger.error('QR generation failed after artifact create', { artifactId: artifact.id, err });
     });
 
-    // Trigger embedding pipeline (PRD §8.3.2). Fire-and-forget — S4-02 will replace with Bull queue.
-    this.embeddingService.generateAndStore(artifact.id).catch((err: unknown) => {
-      this.logger.error('Embedding generation failed after artifact create', { artifactId: artifact.id, err });
-    });
+    // Enqueue async embedding job (PRD §8.3.2 step 6 — never blocks the API response).
+    await this.embeddingQueue.add(
+      { artifactId: artifact.id },
+      { attempts: 3, backoff: { type: 'exponential', delay: 2_000 } },
+    );
 
     return artifact;
   }
@@ -212,11 +216,11 @@ export class ArtifactsService {
 
     await this.writeAuditLog(actor, 'artifact.updated', 'artifact', id, artifact.museumId, ipAddress);
 
-    // S4-02 will replace this with a Bull queue enqueue.
     if (embeddingFieldChanged) {
-      this.embeddingService.generateAndStore(updated.id).catch((err: unknown) => {
-        this.logger.error('Re-embedding failed after artifact update', { artifactId: updated.id, err });
-      });
+      await this.embeddingQueue.add(
+        { artifactId: updated.id },
+        { attempts: 3, backoff: { type: 'exponential', delay: 2_000 } },
+      );
     }
 
     return updated;
