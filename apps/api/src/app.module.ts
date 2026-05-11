@@ -6,6 +6,7 @@ import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { RedisThrottlerGuard } from './common/guards/redis-throttler.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
+import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { LoggerModule } from './common/logger/logger.module';
 import appConfig from './config/app.config';
 import authConfig from './config/auth.config';
@@ -58,6 +59,10 @@ import { RedisModule } from './redis/redis.module';
     {
       provide: APP_GUARD,
       useClass: RedisThrottlerGuard,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: JwtAuthGuard,
     },
     {
       provide: APP_GUARD,

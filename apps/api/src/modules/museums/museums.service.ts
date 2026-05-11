@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import type { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 
 import type { JwtPayload } from '../../common/decorators/current-user.decorator';
 import { ErrorCode } from '../../common/errors/error-codes';
@@ -66,9 +66,13 @@ export class MuseumsService {
 
     if (dto.cursor) {
       try {
-        cursorPayload = JSON.parse(
+        const parsed = JSON.parse(
           Buffer.from(dto.cursor, 'base64').toString('utf8'),
         ) as CursorPayload;
+        const date = new Date(parsed.createdAt);
+        if (parsed.id && !isNaN(date.getTime())) {
+          cursorPayload = parsed;
+        }
       } catch {
         cursorPayload = null;
       }
@@ -96,6 +100,7 @@ export class MuseumsService {
         slug: true,
         logoUrl: true,
         address: true,
+        isActive: true,
         createdAt: true,
       },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
@@ -150,17 +155,27 @@ export class MuseumsService {
       });
     }
 
-    return this.prisma.museum.create({
-      data: {
-        name: dto.name,
-        slug: dto.slug,
-        description: dto.description ?? null,
-        logoUrl: dto.logoUrl ?? null,
-        address: dto.address as object,
-        settings: DEFAULT_SETTINGS,
-        isActive: false, // museums start inactive per PRD §12.3
-      },
-    });
+    try {
+      return await this.prisma.museum.create({
+        data: {
+          name: dto.name,
+          slug: dto.slug,
+          description: dto.description ?? null,
+          logoUrl: dto.logoUrl ?? null,
+          address: dto.address as object,
+          settings: DEFAULT_SETTINGS,
+          isActive: false, // museums start inactive per PRD §12.3
+        },
+      });
+    } catch (err) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        throw new ConflictException({
+          message: 'A museum with this slug already exists.',
+          errorCode: ErrorCode.MUSEUM_SLUG_EXISTS,
+        });
+      }
+      throw err;
+    }
   }
 
   // ── Update (museum_admin own | super_admin any) ─────────────────────────
