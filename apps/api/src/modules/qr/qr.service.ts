@@ -21,7 +21,8 @@ import type { QrHmacKey } from '../../config/qr.config';
 @Injectable()
 export class QrService {
   private readonly logger = new Logger(QrService.name);
-  private readonly keys: QrHmacKey[];
+  // PRD §8.4.3 — keep only the 2 most recent secrets for validation.
+  private readonly validKeys: QrHmacKey[];
   private readonly activeKey: QrHmacKey;
 
   constructor(
@@ -29,10 +30,18 @@ export class QrService {
     private readonly storage: StorageService,
     private readonly config: ConfigService,
   ) {
-    this.keys = this.config.get<QrHmacKey[]>('qr.keys', []);
+    const allKeys = this.config.get<QrHmacKey[]>('qr.keys', []);
+    // Slice to the 2 most recent entries (last in array = newest).
+    this.validKeys = allKeys.slice(-2);
     const active = this.config.get<QrHmacKey>('qr.activeKey');
     if (!active) throw new Error('No active QR HMAC key configured');
     this.activeKey = active;
+
+    if (allKeys.length > 2) {
+      this.logger.warn(
+        `QR_HMAC_SECRETS has ${allKeys.length} keys; only the 2 most recent (${this.validKeys.map((k) => k.kid).join(', ')}) are accepted for validation`,
+      );
+    }
   }
 
   // ── Auto-generate QR on artifact creation (PRD §8.4.1) ───────────────────
@@ -194,7 +203,8 @@ export class QrService {
 
   // ── Private helpers ───────────────────────────────────────────────────────
 
+  // Only the 2 most recent keys are valid (PRD §8.4.3).
   private resolveKey(kid: string): QrHmacKey | undefined {
-    return this.keys.find((k) => k.kid === kid);
+    return this.validKeys.find((k) => k.kid === kid);
   }
 }
