@@ -4,19 +4,29 @@ import {
   BadRequestException,
   ForbiddenException,
   GoneException,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bull';
+import type { Queue } from 'bull';
 import { ConfigService } from '@nestjs/config';
+import type Redis from 'ioredis';
 import * as QRCode from 'qrcode';
 
 import type { JwtPayload } from '../../common/decorators/current-user.decorator';
 import { ErrorCode } from '../../common/errors/error-codes';
 import { PrismaService } from '../../prisma/prisma.service';
+import { REDIS_CLIENT } from '../../redis/redis.module';
 import { StorageService } from '../storage/storage.service';
 import type { QrHmacKey } from '../../config/qr.config';
+import {
+  QR_BULK_GENERATE_QUEUE,
+  type QrBulkGenerateJob,
+} from './processors/qr-bulk-generate.processor';
+import type { BulkGenerateQrDto } from './dto/bulk-generate-qr.dto';
 
 @Injectable()
 export class QrService {
@@ -29,6 +39,8 @@ export class QrService {
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
     private readonly config: ConfigService,
+    @InjectQueue(QR_BULK_GENERATE_QUEUE) private readonly bulkQueue: Queue<QrBulkGenerateJob>,
+    @Inject(REDIS_CLIENT) private readonly redis: Redis,
   ) {
     const allKeys = this.config.get<QrHmacKey[]>('qr.keys', []);
     // Slice to the 2 most recent entries (last in array = newest).
@@ -199,6 +211,66 @@ export class QrService {
     }
 
     return qr;
+  }
+
+  // ── Bulk-generate QR codes (PRD §8.4.4) ──────────────────────────────────
+
+  async bulkGenerate(dto: BulkGenerateQrDto, actor: JwtPayload): Promise<{ jobId: string }> {
+    const museumId = actor.role === 'super_admin' ? dto.museumId : actor.museumId;
+
+    if (!museumId) {
+      throw new BadRequestException({
+        message: 'museumId is required.',
+        errorCode: ErrorCode.VALIDATION_ERROR,
+      });
+    }
+
+    if (actor.role === 'museum_admin' && actor.museumId !== museumId) {
+      throw new ForbiddenException({
+        message: 'You can only bulk-generate QR codes for your own museum.',
+        errorCode: ErrorCode.FORBIDDEN,
+      });
+    }
+
+    const job = await this.bulkQueue.add(
+      { museumId },
+      { attempts: 2, backoff: { type: 'exponential', delay: 5_000 } },
+    );
+
+    return { jobId: String(job.id) };
+  }
+
+  // ── Bulk-generate status / download URL ──────────────────────────────────
+
+  async getBulkGenerateResult(jobId: string, actor: JwtPayload): Promise<{ status: string; downloadUrl?: string }> {
+    const job = await this.bulkQueue.getJob(jobId);
+
+    if (!job) {
+      throw new NotFoundException({
+        message: 'Bulk generate job not found.',
+        errorCode: ErrorCode.QR_NOT_FOUND,
+      });
+    }
+
+    // Enforce museum ownership: non-super_admin may only read their own job.
+    const jobMuseumId = (job.data as QrBulkGenerateJob).museumId;
+    if (actor.role !== 'super_admin' && actor.museumId !== jobMuseumId) {
+      throw new ForbiddenException({
+        message: 'You can only check bulk generate jobs for your own museum.',
+        errorCode: ErrorCode.FORBIDDEN,
+      });
+    }
+
+    const state = await job.getState();
+
+    if (state !== 'completed') {
+      return { status: state };
+    }
+
+    const downloadUrl = await this.redis.get(`qr:bulk:${jobId}:result`);
+    const result: { status: string; downloadUrl?: string } = { status: 'completed' };
+    if (downloadUrl) result.downloadUrl = downloadUrl;
+    return result;
   }
 
   // ── Private helpers ───────────────────────────────────────────────────────

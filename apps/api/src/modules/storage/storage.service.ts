@@ -6,6 +6,7 @@ import {
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { createPresignedPost } from '@aws-sdk/s3-presigned-post';
 
 @Injectable()
@@ -110,6 +111,13 @@ export class StorageService {
       this.logger.error('S3 getObjectBuffer failed', { key, err });
       throw new InternalServerErrorException('Failed to retrieve file from storage.');
     }
+  }
+
+  // ── Pre-signed GET URL (used for bulk QR ZIP download) ───────────────────
+
+  async getPresignedGetUrl(key: string, expiresIn = 3_600): Promise<string> {
+    const command = new GetObjectCommand({ Bucket: this.bucket, Key: key });
+    return getSignedUrl(this.client, command, { expiresIn });
   }
 
   // ── Delete object ─────────────────────────────────────────────────────────

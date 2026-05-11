@@ -21,6 +21,7 @@ import { CurrentUser, type JwtPayload } from '../../common/decorators/current-us
 import { Public } from '../../common/decorators/public.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { BulkGenerateQrDto } from './dto/bulk-generate-qr.dto';
 import { ValidateQrDto } from './dto/validate-qr.dto';
 import { QrService } from './qr.service';
 
@@ -72,5 +73,40 @@ export class QrController {
     @CurrentUser() actor: JwtPayload,
   ) {
     return this.qrService.deactivate(id, actor);
+  }
+
+  // ── POST /qr/bulk-generate — museum_admin+ (PRD §8.4.4) ──────────────────
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @Roles('museum_admin', 'super_admin')
+  @Post('bulk-generate')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({
+    summary: 'Trigger async bulk QR generation for all active museum artifacts',
+  })
+  @ApiResponse({ status: 202, description: 'Job accepted. Returns jobId for status polling.' })
+  @ApiResponse({ status: 403, description: 'museumId belongs to a different museum.' })
+  bulkGenerate(
+    @Body() dto: BulkGenerateQrDto,
+    @CurrentUser() actor: JwtPayload,
+  ) {
+    return this.qrService.bulkGenerate(dto, actor);
+  }
+
+  // ── GET /qr/bulk-generate/:jobId — museum_admin+ ─────────────────────────
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @Roles('museum_admin', 'super_admin')
+  @Get('bulk-generate/:jobId')
+  @ApiOperation({ summary: 'Check bulk QR generation job status and get download URL' })
+  @ApiResponse({ status: 200, description: 'Job status with optional downloadUrl.' })
+  @ApiResponse({ status: 404, description: 'Job not found.' })
+  getBulkGenerateResult(
+    @Param('jobId') jobId: string,
+    @CurrentUser() actor: JwtPayload,
+  ) {
+    return this.qrService.getBulkGenerateResult(jobId, actor);
   }
 }
