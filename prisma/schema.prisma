@@ -170,7 +170,9 @@ model Artifact {
   audioGuideUrl     String?  @map("audio_guide_url") @db.VarChar(500)
   audioTranscript   String?  @map("audio_transcript") @db.Text
   locationHint      String?  @map("location_hint") @db.VarChar(300)
-  // embedding stored as unsupported type — raw SQL migration will add vector(1536)
+  // vector(1536) — pgvector column added via raw SQL migration (S4-01/S4-04).
+  // Prisma does not have a native vector type; raw SQL is used for reads/writes.
+  embedding         Unsupported("vector(1536)")?
   metadata          Json     @default("{}") @db.JsonB
   suggestedQuestions Json    @default("[]") @map("suggested_questions") @db.JsonB
   createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz

@@ -12,6 +12,7 @@ import appConfig from './config/app.config';
 import authConfig from './config/auth.config';
 import awsConfig from './config/aws.config';
 import databaseConfig from './config/database.config';
+import openaiConfig from './config/openai.config';
 import qrConfig from './config/qr.config';
 import redisConfig from './config/redis.config';
 import { ArtifactsModule } from './modules/artifacts/artifacts.module';
@@ -29,7 +30,7 @@ import { RedisModule } from './redis/redis.module';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [appConfig, authConfig, awsConfig, databaseConfig, qrConfig, redisConfig],
+      load: [appConfig, authConfig, awsConfig, databaseConfig, openaiConfig, qrConfig, redisConfig],
       envFilePath: ['.env.local', '.env'],
     }),
     BullModule.forRootAsync({

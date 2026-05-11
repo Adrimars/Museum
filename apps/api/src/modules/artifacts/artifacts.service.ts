@@ -11,6 +11,7 @@ import { ErrorCode } from '../../common/errors/error-codes';
 import { PrismaService } from '../../prisma/prisma.service';
 import { QrService } from '../qr/qr.service';
 import type { CreateArtifactDto } from './dto/create-artifact.dto';
+import { EmbeddingService } from './embedding.service';
 import type { ListArtifactsDto } from './dto/list-artifacts.dto';
 import type { UpdateArtifactDto } from './dto/update-artifact.dto';
 
@@ -24,6 +25,7 @@ export class ArtifactsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly qrService: QrService,
+    private readonly embeddingService: EmbeddingService,
   ) {}
 
   // ── Paginated list with optional pg_trgm search (PRD §8.3.1) ──────────────
@@ -176,6 +178,11 @@ export class ArtifactsService {
       this.logger.error('QR generation failed after artifact create', { artifactId: artifact.id, err });
     });
 
+    // Trigger embedding pipeline (PRD §8.3.2). Fire-and-forget — S4-02 will replace with Bull queue.
+    this.embeddingService.generateAndStore(artifact.id).catch((err: unknown) => {
+      this.logger.error('Embedding generation failed after artifact create', { artifactId: artifact.id, err });
+    });
+
     return artifact;
   }
 
@@ -205,8 +212,12 @@ export class ArtifactsService {
 
     await this.writeAuditLog(actor, 'artifact.updated', 'artifact', id, artifact.museumId, ipAddress);
 
-    // Sprint 4 will enqueue the embedding job here when embeddingFieldChanged is true.
-    void embeddingFieldChanged;
+    // S4-02 will replace this with a Bull queue enqueue.
+    if (embeddingFieldChanged) {
+      this.embeddingService.generateAndStore(updated.id).catch((err: unknown) => {
+        this.logger.error('Re-embedding failed after artifact update', { artifactId: updated.id, err });
+      });
+    }
 
     return updated;
   }
