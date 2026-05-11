@@ -43,11 +43,11 @@ export class MediaController {
   // ── DELETE /media/:key — museum_admin+ ────────────────────────────────────
 
   @Roles('museum_admin', 'super_admin')
-  @Delete(':key(*)')
+  @Delete('*')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Delete a media asset from S3 by its key' })
+  @ApiOperation({ summary: 'Delete a media asset from S3 by its key (slashes allowed in key)' })
   @ApiResponse({ status: 200, description: 'Asset deleted.' })
-  deleteAsset(@Param('key') key: string, @CurrentUser() actor: JwtPayload) {
+  deleteAsset(@Param('0') key: string, @CurrentUser() actor: JwtPayload) {
     return this.mediaService.deleteAsset(key, actor);
   }
 }
