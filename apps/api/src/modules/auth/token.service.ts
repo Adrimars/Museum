@@ -68,11 +68,11 @@ export class TokenService {
   ): Promise<{ userId: string; jti: string } | null> {
     const tokenHash = createHash('sha256').update(rawToken).digest('hex');
 
-    const record = await this.prisma.refreshToken.findFirst({
-      where: { tokenHash, isRevoked: false },
+    const record = await this.prisma.refreshToken.findUnique({
+      where: { tokenHash },
     });
 
-    if (!record) return null;
+    if (!record || record.isRevoked) return null;
     if (record.expiresAt < new Date()) return null;
 
     // Check Redis blocklist
@@ -87,36 +87,35 @@ export class TokenService {
     userId: string,
     deviceHint?: string,
   ): Promise<RefreshTokenResult> {
-    // Block the old jti in Redis
-    await this.blockJti(oldJti);
-
-    // Revoke in DB
-    await this.prisma.refreshToken.update({
+    const old = await this.prisma.refreshToken.update({
       where: { jti: oldJti },
       data: { isRevoked: true },
+      select: { expiresAt: true },
     });
+
+    await this.blockJti(oldJti, old.expiresAt);
 
     return this.issueRefreshToken(userId, deviceHint);
   }
 
   async revokeRefreshToken(jti: string): Promise<void> {
-    await Promise.all([
-      this.blockJti(jti),
-      this.prisma.refreshToken.update({
-        where: { jti },
-        data: { isRevoked: true },
-      }).catch(() => undefined),
-    ]);
+    const record = await this.prisma.refreshToken.update({
+      where: { jti },
+      data: { isRevoked: true },
+      select: { expiresAt: true },
+    }).catch(() => null);
+
+    await this.blockJti(jti, record?.expiresAt ?? new Date(Date.now() + this.refreshExpiryMs));
   }
 
   async revokeAllUserRefreshTokens(userId: string): Promise<void> {
     const tokens = await this.prisma.refreshToken.findMany({
       where: { userId, isRevoked: false },
-      select: { jti: true },
+      select: { jti: true, expiresAt: true },
     });
 
     await Promise.all([
-      ...tokens.map((t) => this.blockJti(t.jti)),
+      ...tokens.map((t) => this.blockJti(t.jti, t.expiresAt)),
       this.prisma.refreshToken.updateMany({
         where: { userId },
         data: { isRevoked: true },
@@ -124,9 +123,9 @@ export class TokenService {
     ]);
   }
 
-  private async blockJti(jti: string): Promise<void> {
-    const remainingTtlSec = Math.ceil(this.refreshExpiryMs / 1000);
-    await this.redis.set(`blocklist:jti:${jti}`, '1', 'EX', remainingTtlSec);
+  private async blockJti(jti: string, expiresAt: Date): Promise<void> {
+    const remainingSec = Math.max(1, Math.ceil((expiresAt.getTime() - Date.now()) / 1000));
+    await this.redis.set(`blocklist:jti:${jti}`, '1', 'EX', remainingSec);
   }
 
   private parseDurationMs(duration: string): number {

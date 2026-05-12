@@ -8,7 +8,12 @@
       "Bash(npm audit *)",
       "Bash(npx nest *)",
       "Bash(echo \"Exit code: $?\")",
-      "PowerShell(Get-ChildItem -Path \"c:\\\\Users\\\\kures\\\\Desktop\\\\Museum\" -Force | Select-Object Name, @{Name=\"Type\";Expression={if\\($_.PSIsContainer\\){\"Dir\"}else{\"File\"}}} | Format-Table -AutoSize)"
+      "PowerShell(Get-ChildItem -Path \"c:\\\\Users\\\\kures\\\\Desktop\\\\Museum\" -Force | Select-Object Name, @{Name=\"Type\";Expression={if\\($_.PSIsContainer\\){\"Dir\"}else{\"File\"}}} | Format-Table -AutoSize)",
+      "Bash(npx tsc *)",
+      "Bash(npm install *)",
+      "Bash(npx jest *)",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d.get\\('jest',{}\\), indent=2\\)\\)\")",
+      "Bash(npx prisma *)"
     ]
   }
 }
