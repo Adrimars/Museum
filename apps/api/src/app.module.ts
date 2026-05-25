@@ -17,6 +17,7 @@ import qrConfig from './config/qr.config';
 import redisConfig from './config/redis.config';
 import { ArtifactsModule } from './modules/artifacts/artifacts.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { GameModule } from './modules/game/game.module';
 import { HealthModule } from './modules/health/health.module';
 import { MuseumsModule } from './modules/museums/museums.module';
 import { MediaModule } from './modules/media/media.module';
@@ -52,6 +53,7 @@ import { RedisModule } from './redis/redis.module';
     MuseumsModule,
     UsersModule,
     ArtifactsModule,
+    GameModule,
     QrModule,
     StorageModule,
     MediaModule,
