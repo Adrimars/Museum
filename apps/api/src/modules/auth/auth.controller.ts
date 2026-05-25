@@ -9,13 +9,14 @@ import {
   Res,
   UseGuards,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { AuthGuard } from '@nestjs/passport';
 import {
-  ApiBearerAuth,
   ApiOperation,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import type { CookieOptions } from 'express';
 import { Request, Response } from 'express';
 
 import { Public } from '../../common/decorators/public.decorator';
@@ -28,17 +29,23 @@ import { RegisterDto } from './dto/register.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 
 const COOKIE_NAME = 'refreshToken';
-const COOKIE_OPTIONS = {
-  httpOnly: true,
-  secure: process.env['NODE_ENV'] === 'production',
-  sameSite: 'strict' as const,
-  path: '/api/v1/auth',
-};
 
 @ApiTags('Auth')
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  private readonly cookieOptions: CookieOptions;
+
+  constructor(
+    private readonly authService: AuthService,
+    private readonly config: ConfigService,
+  ) {
+    this.cookieOptions = {
+      httpOnly: true,
+      secure: this.config.get<string>('app.nodeEnv') === 'production',
+      sameSite: 'strict',
+      path: '/api/v1/auth',
+    };
+  }
 
   // ── Register ──────────────────────────────────────────────────────────────
 
@@ -176,23 +183,28 @@ export class AuthController {
       req.user,
       req.headers['user-agent'],
     );
+
+    // Refresh token goes into httpOnly cookie — same as every other auth flow.
+    // The access token is NOT placed in the redirect URL (prevents exposure in logs,
+    // browser history, and Referer headers). The frontend /auth/callback page must
+    // call POST /api/v1/auth/refresh (cookie sent automatically) to obtain the
+    // access token from the JSON response body.
     this.setRefreshCookie(res, tokens.refreshToken);
 
-    const frontendUrl = process.env['FRONTEND_URL'] ?? 'http://localhost:5173';
-    res.redirect(`${frontendUrl}/auth/callback?token=${tokens.accessToken}`);
+    const frontendUrl = this.config.get<string>('auth.frontendUrl', 'http://localhost:5173');
+    res.redirect(`${frontendUrl}/auth/callback`);
   }
 
   // ── Cookie helpers ────────────────────────────────────────────────────────
 
-  @ApiBearerAuth()
   private setRefreshCookie(res: Response, rawToken: string): void {
     res.cookie(COOKIE_NAME, rawToken, {
-      ...COOKIE_OPTIONS,
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+      ...this.cookieOptions,
+      maxAge: 7 * 24 * 60 * 60 * 1000,
     });
   }
 
   private clearRefreshCookie(res: Response): void {
-    res.clearCookie(COOKIE_NAME, COOKIE_OPTIONS);
+    res.clearCookie(COOKIE_NAME, this.cookieOptions);
   }
 }

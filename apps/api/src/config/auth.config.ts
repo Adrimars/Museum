@@ -15,4 +15,5 @@ export default registerAs('auth', () => ({
   fromEmail: process.env['FROM_EMAIL'] ?? 'noreply@museumquest.app',
   frontendUrl: process.env['FRONTEND_URL'] ?? 'http://localhost:5173',
   passwordResetTtlMs: parseInt(process.env['PASSWORD_RESET_TTL_MS'] ?? '900000', 10), // 15 min
+  guestTokenExpiry: process.env['GUEST_TOKEN_EXPIRY'] ?? '24h',
 }));

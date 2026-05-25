@@ -5,6 +5,8 @@ export interface JwtPayload {
   sub: string;
   role: string;
   museumId: string | null;
+  /** Present on guest tokens (S5-02) — matches game_sessions.guest_token_jti */
+  jti?: string;
   iat: number;
   exp: number;
 }
