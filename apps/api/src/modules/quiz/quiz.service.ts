@@ -12,6 +12,8 @@ import type { MuseumSettings } from '../game/types/game.types';
 import type { CreateQuizSessionDto } from './dto/create-quiz-session.dto';
 import type { CreateQuizSessionResponseDto } from './dto/quiz-session-response.dto';
 import type { CompleteQuizSessionResponseDto } from './dto/complete-quiz-session-response.dto';
+import type { LeaderboardQueryDto } from './dto/leaderboard-query.dto';
+import type { LeaderboardResponseDto } from './dto/leaderboard-response.dto';
 import type { SubmitQuizAnswerDto } from './dto/submit-quiz-answer.dto';
 import type { SubmitQuizAnswerResponseDto } from './dto/submit-quiz-answer-response.dto';
 import type { QuizClientQuestion, QuizOption, QuizQuestionRaw, QuizSessionCache } from './types/quiz.types';
@@ -363,6 +365,93 @@ export class QuizService {
       questionNumber,
       totalQuestions: total,
     };
+  }
+
+  // ── Leaderboard (S6-04) ───────────────────────────────────────────────────
+
+  async getLeaderboard(
+    museumId: string,
+    query: LeaderboardQueryDto,
+  ): Promise<LeaderboardResponseDto> {
+    const limit = query.limit ?? 50;
+    const period = query.period ?? 'all_time';
+
+    if (period === 'all_time') {
+      return this.getLeaderboardFromRedis(museumId, limit);
+    }
+    // weekly / monthly — served from museum_quiz_scores as a fallback
+    // (TimescaleDB continuous aggregates are wired in S6-05; for now fall back to all_time from DB)
+    return this.getLeaderboardFromDb(museumId, limit, period);
+  }
+
+  private async getLeaderboardFromRedis(
+    museumId: string,
+    limit: number,
+  ): Promise<LeaderboardResponseDto> {
+    const leaderboardKey = `leaderboard:${museumId}`;
+    // ZREVRANGEBYSCORE with scores
+    const rawEntries = await this.redis.zrevrangebyscore(
+      leaderboardKey,
+      '+inf',
+      '-inf',
+      'WITHSCORES',
+      'LIMIT',
+      0,
+      limit,
+    );
+
+    // rawEntries alternates: [userId, score, userId, score, ...]
+    const pairs: Array<{ userId: string; score: number }> = [];
+    for (let i = 0; i < rawEntries.length; i += 2) {
+      pairs.push({ userId: rawEntries[i] as string, score: Number(rawEntries[i + 1]) });
+    }
+
+    if (pairs.length === 0) {
+      return { museumId, period: 'all_time', entries: [] };
+    }
+
+    const userIds = pairs.map((p) => p.userId);
+    const users = await this.prisma.user.findMany({
+      where: { id: { in: userIds } },
+      select: { id: true, displayName: true, avatarUrl: true },
+    });
+    const userMap = new Map(users.map((u) => [u.id, u]));
+
+    const entries = pairs.map((p, idx) => {
+      const u = userMap.get(p.userId);
+      return {
+        rank: idx + 1,
+        userId: p.userId,
+        displayName: u?.displayName ?? 'Unknown',
+        avatarUrl: u?.avatarUrl ?? null,
+        score: p.score,
+      };
+    });
+
+    return { museumId, period: 'all_time', entries };
+  }
+
+  private async getLeaderboardFromDb(
+    museumId: string,
+    limit: number,
+    period: string,
+  ): Promise<LeaderboardResponseDto> {
+    const scores = await this.prisma.museumQuizScore.findMany({
+      where: { museumId, userId: { not: null } },
+      orderBy: { bestScore: 'desc' },
+      take: limit,
+      include: { user: { select: { id: true, displayName: true, avatarUrl: true } } },
+    });
+
+    const entries = scores.map((s, idx) => ({
+      rank: idx + 1,
+      userId: s.userId ?? '',
+      displayName: s.user?.displayName ?? 'Unknown',
+      avatarUrl: s.user?.avatarUrl ?? null,
+      score: s.bestScore,
+    }));
+
+    return { museumId, period, entries };
   }
 
   async getSessionCache(sessionId: string): Promise<QuizSessionCache> {

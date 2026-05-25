@@ -1,4 +1,4 @@
-import { Body, Controller, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 
 import { CurrentUser, type JwtPayload } from '../../common/decorators/current-user.decorator';
@@ -8,6 +8,8 @@ import { CreateQuizSessionDto } from './dto/create-quiz-session.dto';
 import type { CreateQuizSessionResponseDto } from './dto/quiz-session-response.dto';
 import { SubmitQuizAnswerDto } from './dto/submit-quiz-answer.dto';
 import type { CompleteQuizSessionResponseDto } from './dto/complete-quiz-session-response.dto';
+import { LeaderboardQueryDto } from './dto/leaderboard-query.dto';
+import type { LeaderboardResponseDto } from './dto/leaderboard-response.dto';
 import type { SubmitQuizAnswerResponseDto } from './dto/submit-quiz-answer-response.dto';
 import { QuizService } from './quiz.service';
 
@@ -15,6 +17,17 @@ import { QuizService } from './quiz.service';
 @Controller('quiz')
 export class QuizController {
   constructor(private readonly quizService: QuizService) {}
+
+  // ── Leaderboard (S6-04) ────────────────────────────────────────────────────
+
+  @Get('leaderboard/:museumId')
+  @ApiOperation({ summary: 'Get museum leaderboard; all_time from Redis, weekly/monthly from DB (S6-04)' })
+  getLeaderboard(
+    @Param('museumId', ParseUUIDPipe) museumId: string,
+    @Query() query: LeaderboardQueryDto,
+  ): Promise<LeaderboardResponseDto> {
+    return this.quizService.getLeaderboard(museumId, query);
+  }
 
   // ── Session Creation (S6-01) ───────────────────────────────────────────────
 
