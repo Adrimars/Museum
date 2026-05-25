@@ -14,6 +14,8 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { REDIS_CLIENT } from '../../redis/redis.module';
 import type { MuseumSettings } from '../game/types/game.types';
 
+import { AnalyticsService } from '../analytics/analytics.service';
+
 import type { CreateChatSessionDto } from './dto/create-chat-session.dto';
 
 @Injectable()
@@ -28,6 +30,7 @@ export class AiService {
     readonly prisma: PrismaService,
     readonly config: ConfigService,
     @Inject(REDIS_CLIENT) readonly redis: Redis,
+    private readonly analyticsService: AnalyticsService,
   ) {
     this.anthropic = new Anthropic({
       apiKey: config.get<string>('anthropic.apiKey', ''),
@@ -55,6 +58,11 @@ export class AiService {
         museumId: dto.museumId,
         artifactContextId: dto.artifactContextId ?? null,
       },
+    });
+
+    this.analyticsService.emit('ai_session_started', dto.museumId, user.sub, {
+      sessionId: session.id,
+      artifactContextId: dto.artifactContextId,
     });
 
     this.logger.log(`AI chat session created: ${session.id} (user=${user.sub})`);
@@ -351,6 +359,12 @@ Respond in the same language the visitor uses. Keep responses under 300 words un
 
       client.emit('ai:typing_end', { content: fullResponse });
       this.logger.log(`AI stream complete: session=${sessionId} tokens=${outputTokens}`);
+
+      this.analyticsService.emit('ai_message_sent', session.museumId, user.sub, { sessionId });
+      this.analyticsService.emit('ai_response_received', session.museumId, user.sub, {
+        sessionId,
+        tokensUsed: outputTokens,
+      });
     } catch (err) {
       this.logger.error('Claude streaming error', { sessionId, err });
       client.emit('ai:error', { errorCode: ErrorCode.INTERNAL_ERROR, message: 'AI service error. Please retry.' });

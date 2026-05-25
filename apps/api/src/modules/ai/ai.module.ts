@@ -4,6 +4,7 @@ import { JwtModule } from '@nestjs/jwt';
 
 import { PrismaModule } from '../../prisma/prisma.module';
 import { AuthModule } from '../auth/auth.module';
+import { AnalyticsModule } from '../analytics/analytics.module';
 
 import { AiController } from './ai.controller';
 import { AiGateway } from './ai.gateway';
@@ -13,6 +14,7 @@ import { AiService } from './ai.service';
   imports: [
     PrismaModule,
     AuthModule,
+    AnalyticsModule,
     // JwtModule needed for manual WebSocket JWT validation in the gateway
     JwtModule.registerAsync({
       imports: [ConfigModule],
