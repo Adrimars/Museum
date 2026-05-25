@@ -436,19 +436,34 @@ export class QuizService {
     limit: number,
     period: string,
   ): Promise<LeaderboardResponseDto> {
-    const scores = await this.prisma.museumQuizScore.findMany({
-      where: { museumId, userId: { not: null } },
-      orderBy: { bestScore: 'desc' },
-      take: limit,
-      include: { user: { select: { id: true, displayName: true, avatarUrl: true } } },
-    });
+    const view =
+      period === 'weekly' ? 'quiz_leaderboard_weekly' : 'quiz_leaderboard_monthly';
+    const windowInterval = period === 'weekly' ? '7 days' : '30 days';
 
-    const entries = scores.map((s, idx) => ({
+    type AggRow = { user_id: string; best_score: bigint | number; display_name: string; avatar_url: string | null };
+
+    const rows = await this.prisma.$queryRawUnsafe<AggRow[]>(
+      `SELECT
+         agg.user_id,
+         agg.best_score,
+         u.display_name,
+         u.avatar_url
+       FROM ${view} agg
+       JOIN users u ON u.id = agg.user_id
+       WHERE agg.museum_id = $1::uuid
+         AND agg.bucket >= NOW() - INTERVAL '${windowInterval}'
+       ORDER BY agg.best_score DESC
+       LIMIT $2`,
+      museumId,
+      limit,
+    );
+
+    const entries = rows.map((row, idx) => ({
       rank: idx + 1,
-      userId: s.userId ?? '',
-      displayName: s.user?.displayName ?? 'Unknown',
-      avatarUrl: s.user?.avatarUrl ?? null,
-      score: s.bestScore,
+      userId: row.user_id,
+      displayName: row.display_name,
+      avatarUrl: row.avatar_url,
+      score: Number(row.best_score),
     }));
 
     return { museumId, period, entries };
