@@ -5,6 +5,8 @@ import { AiFlagStatus } from '@prisma/client';
 import type Redis from 'ioredis';
 import OpenAI from 'openai';
 
+import type { Socket } from 'socket.io';
+
 import type { JwtPayload } from '../../common/decorators/current-user.decorator';
 import { ErrorCode } from '../../common/errors/error-codes';
 import { ApiException } from '../../common/exceptions/api.exception';
@@ -95,6 +97,125 @@ export class AiService {
         ErrorCode.AI_DISABLED,
         HttpStatus.FORBIDDEN,
       );
+    }
+  }
+
+  // ── S7-03: Core streaming method invoked by the WebSocket gateway ─────────
+
+  async streamMessage(
+    client: Socket,
+    user: JwtPayload,
+    sessionId: string,
+    userMessage: string,
+  ): Promise<void> {
+    const session = await this.prisma.aiChatSession.findFirst({
+      where: { id: sessionId, userId: user.sub },
+      include: { museum: { select: { settings: true, name: true } } },
+    });
+
+    if (!session) {
+      client.emit('ai:error', { errorCode: ErrorCode.AI_SESSION_NOT_FOUND, message: 'Session not found.' });
+      return;
+    }
+
+    const settings = session.museum.settings as unknown as MuseumSettings;
+
+    // S7-08: AI enabled check (also enforced on createSession, duplicated here for WS path)
+    if (!settings.ai_config?.isEnabled) {
+      client.emit('ai:error', { errorCode: ErrorCode.AI_DISABLED, message: 'AI assistant is disabled for this museum.' });
+      return;
+    }
+
+    // ── RAG pipeline (S7-02) ─────────────────────────────────────────────────
+    const queryVector = await this.embedText(userMessage);
+    const context = await this.retrieveContext(
+      session.museumId,
+      queryVector,
+      session.artifactContextId ?? undefined,
+    );
+
+    // Focused artifact context injection
+    let focusedArtifactSection = '';
+    if (session.artifactContextId) {
+      const artifact = await this.prisma.artifact.findFirst({
+        where: { id: session.artifactContextId, deletedAt: null },
+        select: { name: true, description: true, historicalContext: true },
+      });
+      if (artifact) {
+        focusedArtifactSection = `\n\nThe visitor is currently viewing: **${artifact.name}**\n${artifact.description ?? ''}\n${artifact.historicalContext ?? ''}`;
+      }
+    }
+
+    // Build system prompt
+    const personaName = settings.ai_config?.personaName ?? 'Museum Guide';
+    const systemOverride = settings.ai_config?.systemPromptOverride;
+    const ragContext = context
+      .map((a) => `**${a.name}**: ${a.description ?? ''} ${a.historicalContext ?? ''}`)
+      .join('\n---\n');
+
+    const systemPrompt = systemOverride
+      ? systemOverride
+      : `You are ${personaName}, a knowledgeable and engaging guide for ${session.museum.name}.
+Answer questions about artifacts and the museum concisely and informatively. Stay on topic.
+
+Relevant artifact information:
+---
+${ragContext || 'No specific context available.'}
+---${focusedArtifactSection}
+
+Respond in the same language the visitor uses. Keep responses under 300 words unless more detail is needed.`;
+
+    // Build message history (last 20 messages)
+    const history = await this.prisma.aiMessage.findMany({
+      where: { sessionId },
+      orderBy: { createdAt: 'asc' },
+      take: 20,
+      select: { role: true, content: true },
+    });
+
+    const messages: Anthropic.MessageParam[] = [
+      ...history.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+      { role: 'user', content: userMessage },
+    ];
+
+    // Persist user message before streaming starts
+    await this.prisma.aiMessage.create({
+      data: { sessionId, role: 'user', content: userMessage, tokensUsed: 0 },
+    });
+
+    // ── Claude streaming (S7-03) ──────────────────────────────────────────────
+    client.emit('ai:typing_start');
+
+    let fullResponse = '';
+    let outputTokens = 0;
+
+    try {
+      const stream = this.anthropic.messages.stream({
+        model: this.model,
+        max_tokens: 1024,
+        system: systemPrompt,
+        messages,
+      });
+
+      for await (const event of stream) {
+        if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+          fullResponse += event.delta.text;
+          client.emit('ai:token', { token: event.delta.text });
+        }
+      }
+
+      const finalMsg = await stream.finalMessage();
+      outputTokens = finalMsg.usage.output_tokens;
+
+      await this.prisma.aiMessage.create({
+        data: { sessionId, role: 'assistant', content: fullResponse, tokensUsed: outputTokens },
+      });
+
+      client.emit('ai:typing_end', { content: fullResponse });
+      this.logger.log(`AI stream complete: session=${sessionId} tokens=${outputTokens}`);
+    } catch (err) {
+      this.logger.error('Claude streaming error', { sessionId, err });
+      client.emit('ai:error', { errorCode: ErrorCode.INTERNAL_ERROR, message: 'AI service error. Please retry.' });
     }
   }
 
