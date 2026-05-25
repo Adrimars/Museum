@@ -88,6 +88,53 @@ export class AiService {
     return session;
   }
 
+  // ── S7-07: Suggested questions — lazy, Redis-cached 24h ──────────────────
+
+  async getSuggestedQuestions(artifactId: string, lang: string = 'en'): Promise<string[]> {
+    const cacheKey = `suggested_q:${artifactId}:${lang}`;
+    const cached = await this.redis.get(cacheKey);
+    if (cached) return JSON.parse(cached) as string[];
+
+    const artifact = await this.prisma.artifact.findFirst({
+      where: { id: artifactId, deletedAt: null },
+      select: { name: true, description: true, historicalContext: true, suggestedQuestions: true },
+    });
+    if (!artifact) return [];
+
+    // Admin-defined questions take priority over LLM-generated ones
+    const adminDefined = artifact.suggestedQuestions as string[];
+    if (Array.isArray(adminDefined) && adminDefined.length > 0) {
+      await this.redis.set(cacheKey, JSON.stringify(adminDefined), 'EX', 86_400);
+      return adminDefined;
+    }
+
+    try {
+      const langLabel = lang === 'tr' ? 'Turkish' : 'English';
+      const res = await this.anthropic.messages.create({
+        model: this.model,
+        max_tokens: 256,
+        messages: [
+          {
+            role: 'user',
+            content: `Generate 3-5 engaging visitor questions about this artifact in ${langLabel}.
+Artifact: ${artifact.name}
+Description: ${artifact.description ?? ''}
+Context: ${artifact.historicalContext ?? ''}
+Return ONLY a JSON array of strings, e.g. ["Question?", "Question?"]`,
+          },
+        ],
+      });
+
+      const text = res.content[0]?.type === 'text' ? res.content[0].text : '[]';
+      const questions = JSON.parse(text) as string[];
+      await this.redis.set(cacheKey, JSON.stringify(questions), 'EX', 86_400);
+      return questions;
+    } catch (err) {
+      this.logger.warn('Failed to generate suggested questions', { artifactId, err });
+      return [];
+    }
+  }
+
   // ── S7-06: Keyword blocklist + LLM moderation pre-check ──────────────────
 
   private async checkContentSafety(message: string, client: Socket): Promise<boolean> {

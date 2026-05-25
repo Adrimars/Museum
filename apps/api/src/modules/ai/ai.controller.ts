@@ -1,5 +1,5 @@
-import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger';
+import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
 
 import { CurrentUser, type JwtPayload } from '../../common/decorators/current-user.decorator';
 
@@ -26,6 +26,18 @@ export class AiController {
   @ApiParam({ name: 'id', description: 'Chat session UUID' })
   getSession(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.aiService.getSession(id, user);
+  }
+
+  // S7-07: Suggested questions — lazy, Redis-cached 24h
+  @Get('artifacts/:artifactId/suggested-questions')
+  @ApiOperation({ summary: 'Get suggested questions for an artifact (cached 24h)' })
+  @ApiParam({ name: 'artifactId', description: 'Artifact UUID' })
+  @ApiQuery({ name: 'lang', required: false, description: 'Language code (en | tr)' })
+  getSuggestedQuestions(
+    @Param('artifactId') artifactId: string,
+    @Query('lang') lang: string = 'en',
+  ) {
+    return this.aiService.getSuggestedQuestions(artifactId, lang);
   }
 
   // S7-09: Flag / dismiss an AI message (MVP-STUB)
