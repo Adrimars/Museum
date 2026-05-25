@@ -2,10 +2,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { tokenRegistry } from './token-registry';
 
-const requestHandlers: Array<(config: { headers: Record<string, string> }) => unknown> = [];
-const responseHandlers: Array<{ rejected?: (error: unknown) => Promise<unknown> }> = [];
+const requestHandlers = vi.hoisted(
+  () => [] as Array<(config: { headers: Record<string, string> }) => unknown>,
+);
+const responseHandlers = vi.hoisted(
+  () => [] as Array<{ rejected?: (error: unknown) => Promise<unknown> }>,
+);
 
-const mockApi = {
+const mockApi = vi.hoisted(() => ({
   interceptors: {
     request: {
       use: vi.fn((fulfilled: (config: { headers: Record<string, string> }) => unknown) => {
@@ -20,10 +24,10 @@ const mockApi = {
       }),
     },
   },
-};
+}));
 
-const axiosCreate = vi.fn(() => mockApi);
-const isAxiosError = vi.fn();
+const axiosCreate = vi.hoisted(() => vi.fn(() => mockApi));
+const isAxiosError = vi.hoisted(() => vi.fn());
 
 vi.mock('axios', () => ({
   default: {
@@ -35,6 +39,22 @@ vi.mock('axios', () => ({
 import { api } from './api';
 
 describe('api', () => {
+  const getRequestHandler = () => {
+    const handler = requestHandlers[0];
+    if (!handler) {
+      throw new Error('Request interceptor was not registered');
+    }
+    return handler;
+  };
+
+  const getResponseRejectionHandler = () => {
+    const handler = responseHandlers[0]?.rejected;
+    if (!handler) {
+      throw new Error('Response interceptor was not registered');
+    }
+    return handler;
+  };
+
   beforeEach(() => {
     tokenRegistry.setToken(null);
     tokenRegistry.setClearAuth(() => undefined);
@@ -53,14 +73,14 @@ describe('api', () => {
     tokenRegistry.setToken('token-123');
 
     const config = { headers: {} as Record<string, string> };
-    requestHandlers[0](config);
+    getRequestHandler()(config);
 
     expect(config.headers.Authorization).toBe('Bearer token-123');
   });
 
   it('leaves authorization header untouched when no token exists', () => {
     const config = { headers: {} as Record<string, string> };
-    requestHandlers[0](config);
+    getRequestHandler()(config);
 
     expect(config.headers.Authorization).toBeUndefined();
   });
@@ -72,7 +92,7 @@ describe('api', () => {
 
     const error = { response: { status: 401 } };
 
-    await expect(responseHandlers[0].rejected!(error)).rejects.toBe(error);
+    await expect(getResponseRejectionHandler()(error)).rejects.toBe(error);
     expect(clearAuth).toHaveBeenCalledTimes(1);
   });
 
@@ -83,7 +103,7 @@ describe('api', () => {
 
     const error = { response: { status: 500 } };
 
-    await expect(responseHandlers[0].rejected!(error)).rejects.toBe(error);
+    await expect(getResponseRejectionHandler()(error)).rejects.toBe(error);
     expect(clearAuth).not.toHaveBeenCalled();
   });
 });
