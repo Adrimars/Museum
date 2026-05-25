@@ -12,6 +12,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { AuthGuard } from '@nestjs/passport';
 import {
+  ApiBearerAuth,
   ApiOperation,
   ApiResponse,
   ApiTags,
@@ -19,11 +20,14 @@ import {
 import type { CookieOptions } from 'express';
 import { Request, Response } from 'express';
 
+import { CurrentUser, type JwtPayload } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
+import { Roles } from '../../common/decorators/roles.decorator';
 import { ThrottleGroup } from '../../common/decorators/throttle-group.decorator';
 
 import { AuthService } from './auth.service';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { LinkGuestDto } from './dto/link-guest.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
@@ -206,5 +210,19 @@ export class AuthController {
 
   private clearRefreshCookie(res: Response): void {
     res.clearCookie(COOKIE_NAME, this.cookieOptions);
+  }
+
+  // ── Guest-to-Account Linking (S6-10) ──────────────────────────────────────
+
+  @Post('link-guest')
+  @ApiBearerAuth()
+  @HttpCode(HttpStatus.OK)
+  @Roles('user', 'content_editor', 'museum_admin', 'super_admin')
+  @ApiOperation({ summary: 'Link an existing guest game session to the authenticated user account (S6-10)' })
+  linkGuestSession(
+    @Body() dto: LinkGuestDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.authService.linkGuestSession(dto, user.sub);
   }
 }

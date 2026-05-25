@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'crypto';
 
 import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { JwtService } from '@nestjs/jwt';
 import { Prisma, UserRole } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import Redis from 'ioredis';
@@ -13,6 +14,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { REDIS_CLIENT } from '../../redis/redis.module';
 
 import type { ForgotPasswordDto } from './dto/forgot-password.dto';
+import type { LinkGuestDto } from './dto/link-guest.dto';
 import type { LoginDto } from './dto/login.dto';
 import type { RegisterDto } from './dto/register.dto';
 import type { ResetPasswordDto } from './dto/reset-password.dto';
@@ -31,6 +33,7 @@ export class AuthService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tokenService: TokenService,
+    private readonly jwtService: JwtService,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
     private readonly config: ConfigService,
   ) {}
@@ -390,5 +393,38 @@ export class AuthService {
         <p>If you did not request this, you can safely ignore this email.</p>
       `,
     });
+  }
+
+  // ── Guest-to-Account Linking (S6-10) ──────────────────────────────────────
+
+  async linkGuestSession(
+    dto: LinkGuestDto,
+    userId: string,
+  ): Promise<{ linkedSessions: number }> {
+    // Verify the guest JWT and extract its jti
+    let guestJti: string;
+    try {
+      const payload = this.jwtService.verify<{ jti?: string; role?: string }>(dto.guestToken);
+      if (payload.role !== 'guest' || !payload.jti) {
+        throw new Error('Not a guest token');
+      }
+      guestJti = payload.jti;
+    } catch {
+      throw new ApiException(
+        'Invalid or expired guest token.',
+        ErrorCode.AUTH_TOKEN_INVALID,
+        HttpStatus.UNPROCESSABLE_ENTITY,
+      );
+    }
+
+    // Transfer all unowned game sessions with this guest JTI to the authenticated user
+    const result = await this.prisma.gameSession.updateMany({
+      where: { guestTokenJti: guestJti, userId: null },
+      data: { userId },
+    });
+
+    this.logger.log(`Guest session linked: guestJti=${guestJti} → userId=${userId} (${result.count} sessions)`);
+
+    return { linkedSessions: result.count };
   }
 }
