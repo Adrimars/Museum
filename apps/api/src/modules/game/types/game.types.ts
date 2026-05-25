@@ -27,6 +27,11 @@ export interface MuseumLimits {
   timeBonusEnabled: boolean;
   timeBonusMax: number;
   maxFinalCodeAttempts: number;
+  quizTimerSeconds: number;
+  questionsPerQuizByDifficulty: { easy: number; medium: number; hard: number };
+  pointsPerCorrectByDifficulty: { easy: number; medium: number; hard: number };
+  maxAiTurnsPerSession: number;
+  aiRateLimitPerMinute: number;
 }
 
 export interface MuseumSettings {
