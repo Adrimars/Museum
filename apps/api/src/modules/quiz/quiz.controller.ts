@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 
 import { CurrentUser, type JwtPayload } from '../../common/decorators/current-user.decorator';
@@ -8,9 +8,12 @@ import { CreateQuizSessionDto } from './dto/create-quiz-session.dto';
 import type { CreateQuizSessionResponseDto } from './dto/quiz-session-response.dto';
 import { SubmitQuizAnswerDto } from './dto/submit-quiz-answer.dto';
 import type { CompleteQuizSessionResponseDto } from './dto/complete-quiz-session-response.dto';
+import { CreateQuizQuestionDto } from './dto/create-quiz-question.dto';
 import { LeaderboardQueryDto } from './dto/leaderboard-query.dto';
 import type { LeaderboardResponseDto } from './dto/leaderboard-response.dto';
+import { ListQuizQuestionsDto } from './dto/list-quiz-questions.dto';
 import type { SubmitQuizAnswerResponseDto } from './dto/submit-quiz-answer-response.dto';
+import { UpdateQuizQuestionDto } from './dto/update-quiz-question.dto';
 import { QuizService } from './quiz.service';
 
 @ApiTags('quiz')
@@ -55,6 +58,46 @@ export class QuizController {
     @CurrentUser() user: JwtPayload,
   ): Promise<CompleteQuizSessionResponseDto> {
     return this.quizService.completeSession(id, user);
+  }
+
+  // ── Question Bank CRUD (S6-06) ─────────────────────────────────────────────
+
+  @Post('questions')
+  @ApiBearerAuth()
+  @HttpCode(HttpStatus.CREATED)
+  @Roles('content_editor', 'museum_admin', 'super_admin')
+  @ApiOperation({ summary: 'Create a quiz question in draft status (S6-06)' })
+  createQuestion(@Body() dto: CreateQuizQuestionDto, @CurrentUser() user: JwtPayload) {
+    return this.quizService.createQuestion(dto, user);
+  }
+
+  @Get('questions')
+  @ApiBearerAuth()
+  @Roles('content_editor', 'museum_admin', 'super_admin')
+  @ApiOperation({ summary: 'List quiz questions with filtering by museum/difficulty/status (S6-06)' })
+  listQuestions(@Query() query: ListQuizQuestionsDto, @CurrentUser() user: JwtPayload) {
+    return this.quizService.listQuestions(query, user);
+  }
+
+  @Patch('questions/:id')
+  @ApiBearerAuth()
+  @Roles('content_editor', 'museum_admin', 'super_admin')
+  @ApiOperation({ summary: 'Update a quiz question; only museum_admin+ can publish (S6-06)' })
+  updateQuestion(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateQuizQuestionDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.quizService.updateQuestion(id, dto, user);
+  }
+
+  @Delete('questions/:id')
+  @ApiBearerAuth()
+  @HttpCode(HttpStatus.OK)
+  @Roles('museum_admin', 'super_admin')
+  @ApiOperation({ summary: 'Soft-delete a quiz question (S6-06)' })
+  deleteQuestion(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: JwtPayload) {
+    return this.quizService.deleteQuestion(id, user);
   }
 
   // ── Answer Submission (S6-02) ──────────────────────────────────────────────

@@ -12,10 +12,13 @@ import type { MuseumSettings } from '../game/types/game.types';
 import type { CreateQuizSessionDto } from './dto/create-quiz-session.dto';
 import type { CreateQuizSessionResponseDto } from './dto/quiz-session-response.dto';
 import type { CompleteQuizSessionResponseDto } from './dto/complete-quiz-session-response.dto';
+import type { CreateQuizQuestionDto } from './dto/create-quiz-question.dto';
 import type { LeaderboardQueryDto } from './dto/leaderboard-query.dto';
 import type { LeaderboardResponseDto } from './dto/leaderboard-response.dto';
+import type { ListQuizQuestionsDto } from './dto/list-quiz-questions.dto';
 import type { SubmitQuizAnswerDto } from './dto/submit-quiz-answer.dto';
 import type { SubmitQuizAnswerResponseDto } from './dto/submit-quiz-answer-response.dto';
+import type { UpdateQuizQuestionDto } from './dto/update-quiz-question.dto';
 import type { QuizClientQuestion, QuizOption, QuizQuestionRaw, QuizSessionCache } from './types/quiz.types';
 
 @Injectable()
@@ -467,6 +470,103 @@ export class QuizService {
     }));
 
     return { museumId, period, entries };
+  }
+
+  // ── Question Bank CRUD (S6-06) ────────────────────────────────────────────
+
+  async createQuestion(dto: CreateQuizQuestionDto, user: JwtPayload) {
+    // content_editor is scoped to own museum; super_admin can write to any
+    if (user.role === 'content_editor' && user.museumId !== dto.museumId) {
+      throw new ApiException('Forbidden: wrong museum.', ErrorCode.FORBIDDEN, HttpStatus.FORBIDDEN);
+    }
+
+    return this.prisma.quizQuestion.create({
+      data: {
+        museumId: dto.museumId,
+        artifactId: dto.artifactId ?? null,
+        questionText: dto.questionText,
+        options: dto.options as unknown as object[],
+        difficulty: dto.difficulty,
+        explanation: dto.explanation ?? null,
+        // Defaults to draft — only museum_admin+ can publish
+        status: 'draft',
+      },
+    });
+  }
+
+  async listQuestions(query: ListQuizQuestionsDto, user: JwtPayload) {
+    const museumId = query.museumId ?? user.museumId ?? undefined;
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+
+    const where = {
+      ...(museumId ? { museumId } : {}),
+      ...(query.difficulty ? { difficulty: query.difficulty } : {}),
+      ...(query.status ? { status: query.status } : {}),
+      deletedAt: null,
+    };
+
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.quizQuestion.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.quizQuestion.count({ where }),
+    ]);
+
+    return { items, total, page, limit };
+  }
+
+  async updateQuestion(id: string, dto: UpdateQuizQuestionDto, user: JwtPayload) {
+    const question = await this.prisma.quizQuestion.findFirst({
+      where: { id, deletedAt: null },
+    });
+    if (!question) {
+      throw new ApiException('Question not found.', ErrorCode.QUIZ_INVALID_QUESTION, HttpStatus.NOT_FOUND);
+    }
+
+    // content_editor cannot change status to published
+    if (
+      dto.status === 'published' &&
+      user.role !== 'museum_admin' &&
+      user.role !== 'super_admin'
+    ) {
+      throw new ApiException(
+        'Only museum_admin or super_admin can publish questions.',
+        ErrorCode.FORBIDDEN,
+        HttpStatus.FORBIDDEN,
+      );
+    }
+
+    return this.prisma.quizQuestion.update({
+      where: { id },
+      data: {
+        ...(dto.questionText !== undefined ? { questionText: dto.questionText } : {}),
+        ...(dto.options !== undefined ? { options: dto.options as unknown as object[] } : {}),
+        ...(dto.difficulty !== undefined ? { difficulty: dto.difficulty } : {}),
+        ...(dto.explanation !== undefined ? { explanation: dto.explanation } : {}),
+        ...(dto.status !== undefined ? { status: dto.status } : {}),
+      },
+    });
+  }
+
+  async deleteQuestion(id: string, user: JwtPayload) {
+    const question = await this.prisma.quizQuestion.findFirst({
+      where: { id, deletedAt: null },
+    });
+    if (!question) {
+      throw new ApiException('Question not found.', ErrorCode.QUIZ_INVALID_QUESTION, HttpStatus.NOT_FOUND);
+    }
+    if (user.role === 'content_editor' && user.museumId !== question.museumId) {
+      throw new ApiException('Forbidden: wrong museum.', ErrorCode.FORBIDDEN, HttpStatus.FORBIDDEN);
+    }
+    await this.prisma.quizQuestion.update({
+      where: { id },
+      data: { deletedAt: new Date() },
+    });
+    return { deleted: true };
   }
 
   async getSessionCache(sessionId: string): Promise<QuizSessionCache> {
