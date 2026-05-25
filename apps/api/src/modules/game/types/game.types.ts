@@ -34,6 +34,12 @@ export interface MuseumLimits {
   aiRateLimitPerMinute: number;
 }
 
+export interface AiConfig {
+  personaName: string;
+  systemPromptOverride: string | null;
+  isEnabled: boolean;
+}
+
 export interface MuseumSettings {
   modules: {
     treasureHuntEnabled: boolean;
@@ -41,4 +47,5 @@ export interface MuseumSettings {
     aiAssistantEnabled: boolean;
   };
   limits: MuseumLimits;
+  ai_config: AiConfig;
 }
