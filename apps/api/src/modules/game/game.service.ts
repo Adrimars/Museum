@@ -1,5 +1,5 @@
 import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
-import { GameState } from '@prisma/client';
+import { ContentStatus, GameState } from '@prisma/client';
 import type Redis from 'ioredis';
 
 import { ApiException } from '../../common/exceptions/api.exception';
@@ -13,7 +13,11 @@ import type { GuestTokenResponseDto } from './dto/guest-token.dto';
 import type { ScanClueDto } from './dto/scan-clue.dto';
 import type { SubmitAnswerDto } from './dto/submit-answer.dto';
 import type { VerifyFinalCodeDto } from './dto/verify-final-code.dto';
+import type { CreateScenarioDto } from './dto/create-scenario.dto';
+import type { UpdateScenarioDto } from './dto/update-scenario.dto';
+import type { ListScenariosDto } from './dto/list-scenarios.dto';
 import type { SessionStateDto, CurrentClueDto, ClueQuestionDto } from './dto/session-state.dto';
+import type { JwtPayload } from '../../common/decorators/current-user.decorator';
 
 /** States that represent an in-progress (non-terminal) session. */
 const ACTIVE_STATES: GameState[] = [
@@ -640,5 +644,225 @@ export class GameService {
       createdAt: session.createdAt,
       updatedAt: session.updatedAt,
     };
+  }
+
+  // ── Scenario CRUD (S5-10) ─────────────────────────────────────────────────
+
+  async listScenarios(query: ListScenariosDto, actor: JwtPayload) {
+    const museumId =
+      actor.role === 'super_admin'
+        ? query.museumId
+        : actor.museumId ?? undefined;
+
+    const isAdmin = ['museum_admin', 'content_editor', 'super_admin'].includes(actor.role);
+
+    return this.prisma.gameScenario.findMany({
+      where: {
+        ...(museumId ? { museumId } : {}),
+        ...(!isAdmin ? { status: ContentStatus.published } : {}),
+        deletedAt: null,
+      },
+      select: {
+        id: true,
+        museumId: true,
+        title: true,
+        difficulty: true,
+        status: true,
+        createdAt: true,
+        updatedAt: true,
+        // clues intentionally excluded from list view (large payload)
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async getScenario(id: string, actor: JwtPayload) {
+    const scenario = await this.prisma.gameScenario.findFirst({
+      where: { id, deletedAt: null },
+    });
+
+    if (!scenario) {
+      throw new ApiException(
+        'Game scenario not found.',
+        ErrorCode.GAME_SCENARIO_NOT_FOUND,
+        HttpStatus.NOT_FOUND,
+      );
+    }
+
+    const isAdmin = ['museum_admin', 'content_editor', 'super_admin'].includes(actor.role);
+    if (!isAdmin && scenario.status !== ContentStatus.published) {
+      throw new ApiException(
+        'Game scenario not found.',
+        ErrorCode.GAME_SCENARIO_NOT_FOUND,
+        HttpStatus.NOT_FOUND,
+      );
+    }
+
+    return scenario;
+  }
+
+  async createScenario(dto: CreateScenarioDto, actor: JwtPayload, ip: string) {
+    const museumId = actor.role === 'super_admin' ? undefined : (actor.museumId ?? undefined);
+    if (!museumId && actor.role !== 'super_admin') {
+      throw new ApiException(
+        'Museum context required to create a scenario.',
+        ErrorCode.MUSEUM_NOT_FOUND,
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const resolvedMuseumId = museumId!;
+
+    const scenario = await this.prisma.gameScenario.create({
+      data: {
+        museumId: resolvedMuseumId,
+        title: dto.title,
+        storyIntro: dto.storyIntro,
+        difficulty: dto.difficulty,
+        clues: dto.clues as unknown as object[],
+        finalCode: dto.finalCode,
+        rewardId: dto.rewardId ?? null,
+        status: ContentStatus.draft,
+      },
+    });
+
+    await this.writeAuditLog(actor, 'game_scenario.created', 'game_scenario', scenario.id, resolvedMuseumId, ip);
+    return scenario;
+  }
+
+  async updateScenario(id: string, dto: UpdateScenarioDto, actor: JwtPayload, ip: string) {
+    const scenario = await this.prisma.gameScenario.findFirst({
+      where: { id, deletedAt: null },
+    });
+
+    if (!scenario) {
+      throw new ApiException(
+        'Game scenario not found.',
+        ErrorCode.GAME_SCENARIO_NOT_FOUND,
+        HttpStatus.NOT_FOUND,
+      );
+    }
+
+    this.assertMuseumScope(actor, scenario.museumId);
+
+    const updated = await this.prisma.gameScenario.update({
+      where: { id },
+      data: {
+        ...(dto.title !== undefined && { title: dto.title }),
+        ...(dto.storyIntro !== undefined && { storyIntro: dto.storyIntro }),
+        ...(dto.difficulty !== undefined && { difficulty: dto.difficulty }),
+        ...(dto.clues !== undefined && { clues: dto.clues as unknown as object[] }),
+        ...(dto.finalCode !== undefined && { finalCode: dto.finalCode }),
+        ...(dto.rewardId !== undefined && { rewardId: dto.rewardId }),
+      },
+    });
+
+    await this.writeAuditLog(actor, 'game_scenario.updated', 'game_scenario', id, scenario.museumId, ip);
+    return updated;
+  }
+
+  async publishScenario(id: string, actor: JwtPayload, ip: string) {
+    const scenario = await this.prisma.gameScenario.findFirst({
+      where: { id, deletedAt: null },
+    });
+
+    if (!scenario) {
+      throw new ApiException(
+        'Game scenario not found.',
+        ErrorCode.GAME_SCENARIO_NOT_FOUND,
+        HttpStatus.NOT_FOUND,
+      );
+    }
+
+    this.assertMuseumScope(actor, scenario.museumId);
+
+    const updated = await this.prisma.gameScenario.update({
+      where: { id },
+      data: { status: ContentStatus.published },
+    });
+
+    await this.writeAuditLog(actor, 'game_scenario.published', 'game_scenario', id, scenario.museumId, ip);
+    this.logger.log(`Scenario ${id} published by ${actor.sub}`);
+    return updated;
+  }
+
+  async unpublishScenario(id: string, actor: JwtPayload, ip: string) {
+    const scenario = await this.prisma.gameScenario.findFirst({
+      where: { id, deletedAt: null },
+    });
+
+    if (!scenario) {
+      throw new ApiException(
+        'Game scenario not found.',
+        ErrorCode.GAME_SCENARIO_NOT_FOUND,
+        HttpStatus.NOT_FOUND,
+      );
+    }
+
+    this.assertMuseumScope(actor, scenario.museumId);
+
+    const updated = await this.prisma.gameScenario.update({
+      where: { id },
+      data: { status: ContentStatus.draft },
+    });
+
+    await this.writeAuditLog(actor, 'game_scenario.unpublished', 'game_scenario', id, scenario.museumId, ip);
+    return updated;
+  }
+
+  async deleteScenario(id: string, actor: JwtPayload, ip: string) {
+    const scenario = await this.prisma.gameScenario.findFirst({
+      where: { id, deletedAt: null },
+    });
+
+    if (!scenario) {
+      throw new ApiException(
+        'Game scenario not found.',
+        ErrorCode.GAME_SCENARIO_NOT_FOUND,
+        HttpStatus.NOT_FOUND,
+      );
+    }
+
+    this.assertMuseumScope(actor, scenario.museumId);
+
+    await this.prisma.gameScenario.update({
+      where: { id },
+      data: { deletedAt: new Date() },
+    });
+
+    await this.writeAuditLog(actor, 'game_scenario.deleted', 'game_scenario', id, scenario.museumId, ip);
+    this.logger.log(`Scenario ${id} soft-deleted by ${actor.sub}`);
+  }
+
+  private assertMuseumScope(actor: JwtPayload, scenarioMuseumId: string): void {
+    if (actor.role !== 'super_admin' && actor.museumId !== scenarioMuseumId) {
+      throw new ApiException(
+        'You can only manage scenarios within your own museum.',
+        ErrorCode.FORBIDDEN,
+        HttpStatus.FORBIDDEN,
+      );
+    }
+  }
+
+  private async writeAuditLog(
+    actor: JwtPayload,
+    action: string,
+    targetType: string,
+    targetId: string,
+    museumId: string,
+    ip: string,
+  ): Promise<void> {
+    await this.prisma.auditLog.create({
+      data: {
+        actorId: actor.sub,
+        actorRole: actor.role,
+        action,
+        targetType,
+        targetId,
+        museumId,
+        ipAddress: ip,
+        metadata: {},
+      },
+    });
   }
 }
