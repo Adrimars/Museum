@@ -4,6 +4,7 @@ import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagg
 import { CurrentUser, type JwtPayload } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RewardsService } from '../rewards/rewards.service';
 
 import { AssignRoleDto } from './dto/assign-role.dto';
 import { BanUserDto } from './dto/ban-user.dto';
@@ -16,7 +17,10 @@ import { UsersService } from './users.service';
 @UseGuards(JwtAuthGuard)
 @Controller('users')
 export class UsersController {
-  constructor(private readonly usersService: UsersService) {}
+  constructor(
+    private readonly usersService: UsersService,
+    private readonly rewardsService: RewardsService,
+  ) {}
 
   // ── GET /users (museum_admin own | super_admin all) ─────────────────────
 
@@ -28,6 +32,14 @@ export class UsersController {
   @ApiResponse({ status: 403, description: 'Insufficient role.' })
   findAll(@Query() dto: ListUsersDto, @CurrentUser() actor: JwtPayload) {
     return this.usersService.findAll(dto, actor.role, actor.museumId);
+  }
+
+  // ── GET /me/rewards ──────────────────────────────────────────────────────
+
+  @Get('me/rewards')
+  @ApiOperation({ summary: "List the calling user's earned rewards with asset URLs (S6-07)" })
+  getMyRewards(@CurrentUser() user: JwtPayload) {
+    return this.rewardsService.getUserRewards(user.sub);
   }
 
   // ── GET /me ─────────────────────────────────────────────────────────────
