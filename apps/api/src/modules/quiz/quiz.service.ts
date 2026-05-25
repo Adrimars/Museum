@@ -8,6 +8,7 @@ import { ApiException } from '../../common/exceptions/api.exception';
 import { PrismaService } from '../../prisma/prisma.service';
 import { REDIS_CLIENT } from '../../redis/redis.module';
 import type { MuseumSettings } from '../game/types/game.types';
+import { RewardsService } from '../rewards/rewards.service';
 
 import type { CreateQuizSessionDto } from './dto/create-quiz-session.dto';
 import type { CreateQuizSessionResponseDto } from './dto/quiz-session-response.dto';
@@ -27,6 +28,7 @@ export class QuizService {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly rewardsService: RewardsService,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
   ) {}
 
@@ -342,6 +344,30 @@ export class QuizService {
     this.logger.log(
       `Quiz session completed: ${sessionId} (score=${completed.totalScore}, rank=${userRank})`,
     );
+
+    // Issue quiz_threshold rewards where score meets the configured minimum
+    const eligibleRewards = await this.prisma.reward.findMany({
+      where: {
+        museumId: session.museumId,
+        triggerType: 'quiz_threshold',
+        deletedAt: null,
+      },
+    });
+    for (const reward of eligibleRewards) {
+      const config = reward.triggerConfig as { minScore?: number };
+      const minScore = config?.minScore ?? 0;
+      if (completed.totalScore >= minScore) {
+        try {
+          await this.rewardsService.issueReward({
+            userId: user.sub,
+            rewardId: reward.id,
+            earnedVia: { source: 'quiz_threshold', sessionId, score: completed.totalScore },
+          });
+        } catch {
+          // Silently swallow REWARD_ALREADY_ISSUED
+        }
+      }
+    }
 
     return {
       totalScore: completed.totalScore,

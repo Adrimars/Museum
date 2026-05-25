@@ -8,6 +8,7 @@ import { ApiException } from '../../common/exceptions/api.exception';
 import { PrismaService } from '../../prisma/prisma.service';
 import { REDIS_CLIENT } from '../../redis/redis.module';
 import { TokenService } from '../auth/token.service';
+import { RewardsService } from '../rewards/rewards.service';
 
 import type { CreateScenarioDto } from './dto/create-scenario.dto';
 import type { CreateSessionDto } from './dto/create-session.dto';
@@ -56,7 +57,7 @@ type SessionRow = {
   completedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
-  scenario: { storyIntro: string; clues: unknown; finalCode: string };
+  scenario: { storyIntro: string; clues: unknown; finalCode: string; rewardId: string | null };
   museum: { settings: unknown };
 };
 
@@ -67,6 +68,7 @@ export class GameService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tokenService: TokenService,
+    private readonly rewardsService: RewardsService,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
   ) {}
 
@@ -147,7 +149,7 @@ export class GameService {
 
     const row: SessionRow = {
       ...session,
-      scenario: { storyIntro: scenario.storyIntro, clues: scenario.clues, finalCode: scenario.finalCode },
+      scenario: { storyIntro: scenario.storyIntro, clues: scenario.clues, finalCode: scenario.finalCode, rewardId: scenario.rewardId },
       museum: { settings: scenario.museum.settings },
     };
     await this.cacheSession(row, settings);
@@ -460,7 +462,25 @@ export class GameService {
     const mergedCompleted: SessionRow = { ...session, ...completed, scenario: session.scenario, museum: session.museum };
     await this.evictSession(session.id);   // completed sessions don't need caching
 
-    // Reward issuance integrated in Sprint 6 (RewardsModule).
+    // Issue reward to authenticated users who have a reward linked to this scenario
+    if (session.userId && session.scenario.rewardId) {
+      try {
+        await this.rewardsService.issueReward({
+          userId: session.userId,
+          rewardId: session.scenario.rewardId,
+          earnedVia: { source: 'game_completion', sessionId: session.id },
+        });
+      } catch (err: unknown) {
+        // Swallow REWARD_ALREADY_ISSUED — idempotent on duplicate completions
+        const isAlreadyIssued =
+          err instanceof Error &&
+          'getResponse' in err &&
+          (err as { getResponse: () => { errorCode?: string } }).getResponse()?.errorCode === 'REWARD_ALREADY_ISSUED';
+        if (!isAlreadyIssued) {
+          this.logger.error(`Reward issuance failed for session ${session.id}`, err);
+        }
+      }
+    }
 
     return this.buildSessionState(mergedCompleted, settings);
   }
@@ -516,7 +536,7 @@ export class GameService {
     const session = await this.prisma.gameSession.findFirst({
       where: { id: sessionId },
       include: {
-        scenario: { select: { storyIntro: true, clues: true, finalCode: true } },
+        scenario: { select: { storyIntro: true, clues: true, finalCode: true, rewardId: true } },
         museum: { select: { settings: true } },
       },
     });

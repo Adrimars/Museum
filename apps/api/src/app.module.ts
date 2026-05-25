@@ -19,6 +19,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { GameModule } from './modules/game/game.module';
 import { QuizModule } from './modules/quiz/quiz.module';
+import { RewardsModule } from './modules/rewards/rewards.module';
 import { HealthModule } from './modules/health/health.module';
 import { MediaModule } from './modules/media/media.module';
 import { MuseumsModule } from './modules/museums/museums.module';
@@ -56,6 +57,7 @@ import { RedisModule } from './redis/redis.module';
     ArtifactsModule,
     GameModule,
     QuizModule,
+    RewardsModule,
     QrModule,
     StorageModule,
     MediaModule,
