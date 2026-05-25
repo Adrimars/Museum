@@ -1,9 +1,11 @@
-import { HttpStatus, Injectable, Logger } from '@nestjs/common';
+import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
 import { GameState } from '@prisma/client';
+import type Redis from 'ioredis';
 
 import { ApiException } from '../../common/exceptions/api.exception';
 import { ErrorCode } from '../../common/errors/error-codes';
 import { PrismaService } from '../../prisma/prisma.service';
+import { REDIS_CLIENT } from '../../redis/redis.module';
 import { TokenService } from '../auth/token.service';
 import type { Clue, MuseumSettings } from './types/game.types';
 import type { CreateSessionDto } from './dto/create-session.dto';
@@ -59,6 +61,7 @@ export class GameService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tokenService: TokenService,
+    @Inject(REDIS_CLIENT) private readonly redis: Redis,
   ) {}
 
   // ── Guest Token ───────────────────────────────────────────────────────────
@@ -136,10 +139,13 @@ export class GameService {
       `Game session created: ${session.id} (scenario=${scenario.id}, userId=${userId ?? 'guest'})`,
     );
 
-    return this.buildSessionState(
-      { ...session, scenario: { storyIntro: scenario.storyIntro, clues: scenario.clues, finalCode: scenario.finalCode }, museum: { settings: scenario.museum.settings } },
-      settings,
-    );
+    const row: SessionRow = {
+      ...session,
+      scenario: { storyIntro: scenario.storyIntro, clues: scenario.clues, finalCode: scenario.finalCode },
+      museum: { settings: scenario.museum.settings },
+    };
+    await this.cacheSession(row, settings);
+    return this.buildSessionState(row, settings);
   }
 
   // ── Session Retrieval ─────────────────────────────────────────────────────
@@ -225,10 +231,9 @@ export class GameService {
       data: { state: GameState.QR_SCANNED },
     });
 
-    return this.buildSessionState(
-      { ...session, ...updated, scenario: session.scenario, museum: session.museum },
-      settings,
-    );
+    const merged: SessionRow = { ...session, ...updated, scenario: session.scenario, museum: session.museum };
+    await this.cacheSession(merged, settings);
+    return this.buildSessionState(merged, settings);
   }
 
   // ── Answer Submission (S5-04 + S5-05 + S5-06) ────────────────────────────
@@ -278,10 +283,9 @@ export class GameService {
       data: { state: GameState.INCORRECT, attemptsOnCurrentClue: newAttempts },
     });
 
-    return this.buildSessionState(
-      { ...session, ...updated, scenario: session.scenario, museum: session.museum },
-      settings,
-    );
+    const merged: SessionRow = { ...session, ...updated, scenario: session.scenario, museum: session.museum };
+    await this.cacheSession(merged, settings);
+    return this.buildSessionState(merged, settings);
   }
 
   // ── Internal: advance or force-skip ──────────────────────────────────────
@@ -310,10 +314,9 @@ export class GameService {
         (isLastClue ? 'Entering FINAL_CODE.' : `Next clue: ${nextIndex}.`),
     );
 
-    return this.buildSessionState(
-      { ...session, ...updated, scenario: session.scenario, museum: session.museum },
-      settings,
-    );
+    const merged: SessionRow = { ...session, ...updated, scenario: session.scenario, museum: session.museum };
+    await this.cacheSession(merged, settings);
+    return this.buildSessionState(merged, settings);
   }
 
   private async forceSkipClue(
@@ -330,7 +333,6 @@ export class GameService {
         state: isLastClue ? GameState.FINAL_CODE : GameState.CLUE_ACTIVE,
         currentClueIndex: isLastClue ? session.currentClueIndex : nextIndex,
         attemptsOnCurrentClue: 0,
-        // score unchanged — 0 points for skipped clue
       },
     });
 
@@ -339,10 +341,9 @@ export class GameService {
         (isLastClue ? 'Entering FINAL_CODE.' : `Next clue: ${nextIndex}.`),
     );
 
-    return this.buildSessionState(
-      { ...session, ...updated, scenario: session.scenario, museum: session.museum },
-      settings,
-    );
+    const merged: SessionRow = { ...session, ...updated, scenario: session.scenario, museum: session.museum };
+    await this.cacheSession(merged, settings);
+    return this.buildSessionState(merged, settings);
   }
 
   private async handleWrongScan(
@@ -361,6 +362,9 @@ export class GameService {
       where: { id: session.id },
       data: { attemptsOnCurrentClue: newAttempts },
     });
+
+    const merged: SessionRow = { ...session, ...updated, scenario: session.scenario, museum: session.museum };
+    await this.cacheSession(merged, settings);
 
     throw new ApiException(
       'Wrong QR code scanned. This counts as an incorrect attempt.',
@@ -410,10 +414,11 @@ export class GameService {
 
     // Brute-force guard tracked in DB via attemptsOnCurrentClue (reused for final code)
     if (session.attemptsOnCurrentClue >= maxFinalAttempts) {
-      const expired = await this.prisma.gameSession.update({
+      await this.prisma.gameSession.update({
         where: { id: session.id },
         data: { state: GameState.EXPIRED },
       });
+      await this.evictSession(session.id);
       throw new ApiException(
         'Maximum final code attempts exceeded. Session expired.',
         ErrorCode.GAME_SESSION_EXPIRED,
@@ -425,10 +430,12 @@ export class GameService {
 
     if (!isMatch) {
       const newAttempts = session.attemptsOnCurrentClue + 1;
-      await this.prisma.gameSession.update({
+      const updated = await this.prisma.gameSession.update({
         where: { id: session.id },
         data: { attemptsOnCurrentClue: newAttempts },
       });
+      const merged: SessionRow = { ...session, ...updated, scenario: session.scenario, museum: session.museum };
+      await this.cacheSession(merged, settings);
       throw new ApiException(
         'Incorrect final code. Please try again.',
         ErrorCode.GAME_FINAL_CODE_INVALID,
@@ -442,16 +449,14 @@ export class GameService {
       data: { state: GameState.COMPLETED, completedAt: new Date() },
     });
 
-    this.logger.log(
-      `Session ${session.id} COMPLETED. Final score: ${session.score}.`,
-    );
+    this.logger.log(`Session ${session.id} COMPLETED. Final score: ${session.score}.`);
 
-    // Reward issuance will be integrated in Sprint 6 (RewardsModule).
+    const mergedCompleted: SessionRow = { ...session, ...completed, scenario: session.scenario, museum: session.museum };
+    await this.evictSession(session.id);   // completed sessions don't need caching
 
-    return this.buildSessionState(
-      { ...session, ...completed, scenario: session.scenario, museum: session.museum },
-      settings,
-    );
+    // Reward issuance integrated in Sprint 6 (RewardsModule).
+
+    return this.buildSessionState(mergedCompleted, settings);
   }
 
   // ── Guard helpers ─────────────────────────────────────────────────────────
@@ -491,9 +496,17 @@ export class GameService {
     }
   }
 
-  // ── Session loader ────────────────────────────────────────────────────────
+  // ── Session loader (S5-08: Redis hot-path) ───────────────────────────────
 
   async loadSession(sessionId: string): Promise<SessionRow> {
+    // 1. Try Redis cache first
+    const cached = await this.getCachedSession(sessionId);
+    if (cached) {
+      await this.checkAndExpireTimeout(cached);
+      return cached;
+    }
+
+    // 2. Cache miss → Postgres
     const session = await this.prisma.gameSession.findFirst({
       where: { id: sessionId },
       include: {
@@ -510,7 +523,76 @@ export class GameService {
       );
     }
 
-    return session as unknown as SessionRow;
+    const row = session as unknown as SessionRow;
+    const settings = row.museum.settings as unknown as MuseumSettings;
+
+    // S5-09: expire check on load
+    await this.checkAndExpireTimeout(row);
+
+    // Re-cache for hot path
+    await this.cacheSession(row, settings);
+
+    return row;
+  }
+
+  // ── Cache helpers (S5-08) ─────────────────────────────────────────────────
+
+  private sessionCacheKey(sessionId: string): string {
+    return `game:session:${sessionId}`;
+  }
+
+  private async getCachedSession(sessionId: string): Promise<SessionRow | null> {
+    try {
+      const raw = await this.redis.get(this.sessionCacheKey(sessionId));
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as SessionRow;
+      // Revive Date fields
+      parsed.createdAt = new Date(parsed.createdAt);
+      parsed.updatedAt = new Date(parsed.updatedAt);
+      if (parsed.completedAt) parsed.completedAt = new Date(parsed.completedAt);
+      return parsed;
+    } catch {
+      return null;
+    }
+  }
+
+  async cacheSession(session: SessionRow, settings: MuseumSettings): Promise<void> {
+    const timeoutHours = settings?.limits?.gameSessionTimeoutHours ?? 4;
+    const timeoutMs = timeoutHours * 3600 * 1000;
+    const elapsedMs = Date.now() - new Date(session.createdAt).getTime();
+    const remainingSec = Math.max(1, Math.ceil((timeoutMs - elapsedMs) / 1000));
+
+    await this.redis.set(
+      this.sessionCacheKey(session.id),
+      JSON.stringify(session),
+      'EX',
+      remainingSec,
+    );
+  }
+
+  async evictSession(sessionId: string): Promise<void> {
+    await this.redis.del(this.sessionCacheKey(sessionId));
+  }
+
+  // ── Timeout check (S5-09) ─────────────────────────────────────────────────
+
+  private async checkAndExpireTimeout(session: SessionRow): Promise<void> {
+    if (session.state === GameState.COMPLETED || session.state === GameState.EXPIRED) return;
+
+    const settings = session.museum.settings as unknown as MuseumSettings;
+    const timeoutHours = settings?.limits?.gameSessionTimeoutHours ?? 4;
+    const timeoutMs = timeoutHours * 3600 * 1000;
+    const age = Date.now() - new Date(session.createdAt).getTime();
+
+    if (age > timeoutMs) {
+      await this.prisma.gameSession.update({
+        where: { id: session.id },
+        data: { state: GameState.EXPIRED },
+      });
+      await this.evictSession(session.id);
+      session.state = GameState.EXPIRED;
+      this.logger.log(`Session ${session.id} expired after ${Math.round(age / 3600000)}h.`);
+    }
   }
 
   // ── Response builder ──────────────────────────────────────────────────────
