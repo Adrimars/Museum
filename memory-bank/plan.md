@@ -176,6 +176,7 @@
 | S8-18 | Grafana dashboards: latency, errors, DB pool, Redis, ECS, AI costs | Infra | P1 |
 | S8-19 | Health endpoints: `/health/live`, `/health/ready` | HealthModule | P0 |
 | S8-20 | Consent flows: cookie banner, registration checkbox | Frontend | P0 |
+| S8-21 | Service Worker static-asset caching: app shell + core images precached via Vite PWA Plugin (stale-while-revalidate strategy) | Frontend | P1 |
 
 ---
 
