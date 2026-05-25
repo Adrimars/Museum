@@ -7,6 +7,7 @@ import { RedisThrottlerGuard } from './common/guards/redis-throttler.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { LoggerModule } from './common/logger/logger.module';
+import analyticsConfig from './config/analytics.config';
 import anthropicConfig from './config/anthropic.config';
 import appConfig from './config/app.config';
 import authConfig from './config/auth.config';
@@ -16,6 +17,7 @@ import openaiConfig from './config/openai.config';
 import qrConfig from './config/qr.config';
 import redisConfig from './config/redis.config';
 import { AiModule } from './modules/ai/ai.module';
+import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { ArtifactsModule } from './modules/artifacts/artifacts.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
@@ -35,7 +37,7 @@ import { RedisModule } from './redis/redis.module';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [anthropicConfig, appConfig, authConfig, awsConfig, databaseConfig, openaiConfig, qrConfig, redisConfig],
+      load: [analyticsConfig, anthropicConfig, appConfig, authConfig, awsConfig, databaseConfig, openaiConfig, qrConfig, redisConfig],
       envFilePath: ['.env.local', '.env'],
     }),
     BullModule.forRootAsync({
@@ -64,6 +66,7 @@ import { RedisModule } from './redis/redis.module';
     StorageModule,
     MediaModule,
     AiModule,
+    AnalyticsModule,
   ],
   providers: [
     {
