@@ -88,6 +88,45 @@ export class AiService {
     return session;
   }
 
+  // ── S7-06: Keyword blocklist + LLM moderation pre-check ──────────────────
+
+  private async checkContentSafety(message: string, client: Socket): Promise<boolean> {
+    const keywords = await this.redis.smembers('content_safety:blocklist');
+    const lower = message.toLowerCase();
+    for (const kw of keywords) {
+      if (lower.includes(kw.toLowerCase())) {
+        client.emit('ai:error', {
+          errorCode: ErrorCode.AI_CONTENT_BLOCKED,
+          message: 'Your message was blocked due to content policy.',
+        });
+        return false;
+      }
+    }
+
+    try {
+      const mod = await this.anthropic.messages.create({
+        model: this.model,
+        max_tokens: 10,
+        system: 'You are a content safety classifier. Reply with only "SAFE" or "UNSAFE".',
+        messages: [{ role: 'user', content: `Is this safe for a museum chatbot? "${message}"` }],
+      });
+      const verdict =
+        mod.content[0]?.type === 'text' ? mod.content[0].text.trim().toUpperCase() : 'SAFE';
+      if (verdict === 'UNSAFE') {
+        client.emit('ai:error', {
+          errorCode: ErrorCode.AI_CONTENT_BLOCKED,
+          message: 'Your message was blocked due to content policy.',
+        });
+        return false;
+      }
+    } catch (err) {
+      // Fail-open: a moderation timeout should not block legitimate visitors
+      this.logger.warn('Content safety LLM check failed — allowing', { err });
+    }
+
+    return true;
+  }
+
   // ── S7-04: Redis sliding window rate limiter ──────────────────────────────
 
   private async checkRateLimit(userId: string, limitPerMinute: number): Promise<boolean> {
@@ -158,6 +197,23 @@ export class AiService {
         errorCode: ErrorCode.AI_MAX_TURNS_EXCEEDED,
         message: 'Maximum conversation turns reached for this session.',
       });
+      return;
+    }
+
+    // ── S7-06: Content safety — blocklist then LLM moderation ────────────────
+    const isTerminated = await this.redis.get(`ai_session_terminated:${sessionId}`);
+    if (isTerminated) {
+      client.emit('ai:error', {
+        errorCode: ErrorCode.AI_CONTENT_BLOCKED,
+        message: 'Session has been terminated due to a content policy violation.',
+      });
+      return;
+    }
+
+    const safeContent = await this.checkContentSafety(userMessage, client);
+    if (!safeContent) {
+      await this.redis.set(`ai_session_terminated:${sessionId}`, '1', 'EX', 86_400);
+      client.disconnect();
       return;
     }
 
