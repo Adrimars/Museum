@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common';
 
 import { PrismaModule } from '../../prisma/prisma.module';
 
+import { AnalyticsController } from './analytics.controller';
 import { AnalyticsProcessor } from './analytics.processor';
 import { AnalyticsService, ANALYTICS_QUEUE } from './analytics.service';
 
@@ -11,6 +12,7 @@ import { AnalyticsService, ANALYTICS_QUEUE } from './analytics.service';
     PrismaModule,
     BullModule.registerQueue({ name: ANALYTICS_QUEUE }),
   ],
+  controllers: [AnalyticsController],
   providers: [AnalyticsService, AnalyticsProcessor],
   exports: [AnalyticsService],
 })
