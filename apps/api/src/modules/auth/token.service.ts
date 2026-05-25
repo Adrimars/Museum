@@ -40,6 +40,18 @@ export class TokenService {
     return this.jwt.sign(payload);
   }
 
+  /** Issues a short-lived guest JWT with no DB record (S5-02). */
+  issueGuestToken(): { token: string; jti: string; expiresAt: Date } {
+    const jti = uuidv4();
+    const expiryStr = this.config.get<string>('auth.guestTokenExpiry', '24h');
+    const expiresAt = new Date(Date.now() + this.parseDurationMs(expiryStr));
+    const token = this.jwt.sign(
+      { role: 'guest', museumId: null },
+      { subject: `guest:${jti}`, jwtid: jti, expiresIn: expiryStr },
+    );
+    return { token, jti, expiresAt };
+  }
+
   async issueRefreshToken(userId: string, deviceHint?: string): Promise<RefreshTokenResult> {
     // Revoke all previous refresh tokens for this user (1 active device limit)
     await this.revokeAllUserRefreshTokens(userId);

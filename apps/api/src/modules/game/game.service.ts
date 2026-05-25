@@ -4,8 +4,10 @@ import { GameState } from '@prisma/client';
 import { ApiException } from '../../common/exceptions/api.exception';
 import { ErrorCode } from '../../common/errors/error-codes';
 import { PrismaService } from '../../prisma/prisma.service';
+import { TokenService } from '../auth/token.service';
 import type { Clue, MuseumSettings } from './types/game.types';
 import type { CreateSessionDto } from './dto/create-session.dto';
+import type { GuestTokenResponseDto } from './dto/guest-token.dto';
 import type { SessionStateDto, CurrentClueDto, ClueQuestionDto } from './dto/session-state.dto';
 
 /** States that represent an in-progress (non-terminal) session. */
@@ -31,7 +33,17 @@ const QUESTION_VISIBLE_STATES: GameState[] = [
 export class GameService {
   private readonly logger = new Logger(GameService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly tokenService: TokenService,
+  ) {}
+
+  // ── Guest Token ───────────────────────────────────────────────────────────
+
+  issueGuestToken(): GuestTokenResponseDto {
+    const { token, expiresAt } = this.tokenService.issueGuestToken();
+    return { accessToken: token, expiresAt, tokenType: 'Bearer' };
+  }
 
   // ── Session Creation ──────────────────────────────────────────────────────
 
