@@ -11,6 +11,7 @@ import type { MuseumSettings } from '../game/types/game.types';
 
 import type { CreateQuizSessionDto } from './dto/create-quiz-session.dto';
 import type { CreateQuizSessionResponseDto } from './dto/quiz-session-response.dto';
+import type { CompleteQuizSessionResponseDto } from './dto/complete-quiz-session-response.dto';
 import type { SubmitQuizAnswerDto } from './dto/submit-quiz-answer.dto';
 import type { SubmitQuizAnswerResponseDto } from './dto/submit-quiz-answer-response.dto';
 import type { QuizClientQuestion, QuizOption, QuizQuestionRaw, QuizSessionCache } from './types/quiz.types';
@@ -252,6 +253,96 @@ export class QuizService {
       pointsEarned,
       totalScore: updatedSession.totalScore,
       nextQuestion,
+    };
+  }
+
+  // ── Session Completion (S6-03) ────────────────────────────────────────────
+
+  async completeSession(
+    sessionId: string,
+    user: JwtPayload,
+  ): Promise<CompleteQuizSessionResponseDto> {
+    const session = await this.prisma.quizSession.findFirst({
+      where: { id: sessionId, userId: user.sub },
+    });
+    if (!session) {
+      throw new ApiException(
+        'Quiz session not found.',
+        ErrorCode.QUIZ_SESSION_NOT_FOUND,
+        HttpStatus.NOT_FOUND,
+      );
+    }
+    if (session.completedAt) {
+      throw new ApiException(
+        'Quiz session is already completed.',
+        ErrorCode.QUIZ_SESSION_COMPLETED,
+        HttpStatus.CONFLICT,
+      );
+    }
+
+    const now = new Date();
+
+    // Mark session completed in PostgreSQL
+    const completed = await this.prisma.quizSession.update({
+      where: { id: sessionId },
+      data: { completedAt: now },
+    });
+
+    // Upsert museum_quiz_scores — personal best logic
+    const existing = await this.prisma.museumQuizScore.findFirst({
+      where: { userId: user.sub, museumId: session.museumId },
+    });
+
+    let isNewPersonalBest = false;
+    if (!existing) {
+      await this.prisma.museumQuizScore.create({
+        data: {
+          userId: user.sub,
+          museumId: session.museumId,
+          bestScore: completed.totalScore,
+          quizCount: 1,
+          lastPlayedAt: now,
+        },
+      });
+      isNewPersonalBest = true;
+    } else {
+      isNewPersonalBest = completed.totalScore > existing.bestScore;
+      await this.prisma.museumQuizScore.update({
+        where: { id: existing.id },
+        data: {
+          bestScore: isNewPersonalBest ? completed.totalScore : existing.bestScore,
+          quizCount: { increment: 1 },
+          lastPlayedAt: now,
+        },
+      });
+    }
+
+    // Update Redis sorted set for leaderboard (S6-04)
+    const leaderboardKey = `leaderboard:${session.museumId}`;
+    const scoreToStore = isNewPersonalBest ? completed.totalScore : (existing?.bestScore ?? completed.totalScore);
+    await this.redis.zadd(leaderboardKey, scoreToStore, user.sub);
+
+    // Rank = number of members with score strictly higher + 1
+    const rank = await this.redis.zrevrank(leaderboardKey, user.sub);
+    const userRank = rank !== null ? rank + 1 : 1;
+
+    const accuracy =
+      completed.questionsAnswered > 0
+        ? Math.round((completed.correctCount / completed.questionsAnswered) * 100)
+        : 0;
+
+    // Clean up Redis session cache
+    await this.redis.del(`quiz_session:${sessionId}`);
+
+    this.logger.log(
+      `Quiz session completed: ${sessionId} (score=${completed.totalScore}, rank=${userRank})`,
+    );
+
+    return {
+      totalScore: completed.totalScore,
+      rank: userRank,
+      accuracy,
+      isNewPersonalBest,
     };
   }
 

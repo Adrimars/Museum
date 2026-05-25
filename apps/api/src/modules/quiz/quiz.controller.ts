@@ -7,6 +7,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { CreateQuizSessionDto } from './dto/create-quiz-session.dto';
 import type { CreateQuizSessionResponseDto } from './dto/quiz-session-response.dto';
 import { SubmitQuizAnswerDto } from './dto/submit-quiz-answer.dto';
+import type { CompleteQuizSessionResponseDto } from './dto/complete-quiz-session-response.dto';
 import type { SubmitQuizAnswerResponseDto } from './dto/submit-quiz-answer-response.dto';
 import { QuizService } from './quiz.service';
 
@@ -27,6 +28,20 @@ export class QuizController {
     @CurrentUser() user: JwtPayload,
   ): Promise<CreateQuizSessionResponseDto> {
     return this.quizService.createSession(dto, user);
+  }
+
+  // ── Session Completion (S6-03) ─────────────────────────────────────────────
+
+  @Post('sessions/:id/complete')
+  @ApiBearerAuth()
+  @HttpCode(HttpStatus.OK)
+  @Roles('user', 'content_editor', 'museum_admin', 'super_admin')
+  @ApiOperation({ summary: 'Finalize quiz session, upsert personal best, return rank (S6-03)' })
+  completeSession(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<CompleteQuizSessionResponseDto> {
+    return this.quizService.completeSession(id, user);
   }
 
   // ── Answer Submission (S6-02) ──────────────────────────────────────────────
