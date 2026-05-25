@@ -95,6 +95,59 @@ export class AnalyticsService {
         Number(r.dwell_events)    * 0.1,
     }));
   }
+
+  // ── S7-14: Funnel analysis — 5 standard visitor journey funnels ───────────
+
+  async getFunnels(museumId: string, from: Date, to: Date): Promise<FunnelResult[]> {
+    const funnels: Array<{ name: string; steps: string[] }> = [
+      { name: 'discovery_to_reward',   steps: ['artifact_scan', 'game_start', 'game_complete', 'reward_issued'] },
+      { name: 'scan_to_ai',            steps: ['artifact_scan', 'ai_session_started', 'ai_message_sent'] },
+      { name: 'game_to_completion',    steps: ['game_start', 'quiz_answer', 'game_complete'] },
+      { name: 'register_to_first_game', steps: ['user_register', 'artifact_scan', 'game_start'] },
+      { name: 'ai_engagement',         steps: ['ai_session_started', 'ai_message_sent'] },
+    ];
+
+    const results: FunnelResult[] = [];
+
+    for (const funnel of funnels) {
+      const stepRows = await this.prisma.$queryRaw<Array<{ event_type: string; unique_users: bigint }>>`
+        SELECT event_type, COUNT(DISTINCT user_id_hash) AS unique_users
+        FROM analytics_events
+        WHERE museum_id   = ${museumId}::uuid
+          AND occurred_at >= ${from}
+          AND occurred_at <  ${to}
+          AND event_type  = ANY(${funnel.steps}::text[])
+        GROUP BY event_type
+      `;
+
+      const countByEvent = new Map(stepRows.map((r) => [r.event_type, Number(r.unique_users)]));
+
+      const steps: FunnelStep[] = funnel.steps.map((step, idx) => {
+        const count = countByEvent.get(step) ?? 0;
+        const prevCount = idx === 0 ? count : (countByEvent.get(funnel.steps[idx - 1]) ?? 0);
+        return {
+          eventType:      step,
+          uniqueUsers:    count,
+          conversionRate: prevCount > 0 ? Math.round((count / prevCount) * 10000) / 100 : 0,
+        };
+      });
+
+      results.push({ funnel: funnel.name, steps });
+    }
+
+    return results;
+  }
+}
+
+export interface FunnelStep {
+  eventType:      string;
+  uniqueUsers:    number;
+  conversionRate: number;
+}
+
+export interface FunnelResult {
+  funnel: string;
+  steps:  FunnelStep[];
 }
 
 interface RawHeatmapRow {
