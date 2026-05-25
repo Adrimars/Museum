@@ -8,6 +8,8 @@ import { TokenService } from '../auth/token.service';
 import type { Clue, MuseumSettings } from './types/game.types';
 import type { CreateSessionDto } from './dto/create-session.dto';
 import type { GuestTokenResponseDto } from './dto/guest-token.dto';
+import type { ScanClueDto } from './dto/scan-clue.dto';
+import type { SubmitAnswerDto } from './dto/submit-answer.dto';
 import type { SessionStateDto, CurrentClueDto, ClueQuestionDto } from './dto/session-state.dto';
 
 /** States that represent an in-progress (non-terminal) session. */
@@ -21,13 +23,33 @@ const ACTIVE_STATES: GameState[] = [
   GameState.FINAL_CODE,
 ];
 
-/** States in which the question is visible to the visitor. */
+/** States where the question text + options are revealed to the visitor. */
 const QUESTION_VISIBLE_STATES: GameState[] = [
   GameState.QR_SCANNED,
   GameState.ANSWER_SUBMITTED,
   GameState.CORRECT,
   GameState.INCORRECT,
 ];
+
+/** Default base score per correct clue answer. */
+const CLUE_BASE_SCORE = 100;
+
+type SessionRow = {
+  id: string;
+  state: GameState;
+  scenarioId: string;
+  museumId: string;
+  userId: string | null;
+  guestTokenJti: string | null;
+  currentClueIndex: number;
+  score: number;
+  attemptsOnCurrentClue: number;
+  completedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+  scenario: { storyIntro: string; clues: unknown; finalCode: string };
+  museum: { settings: unknown };
+};
 
 @Injectable()
 export class GameService {
@@ -54,9 +76,7 @@ export class GameService {
   ): Promise<SessionStateDto> {
     const scenario = await this.prisma.gameScenario.findFirst({
       where: { id: dto.scenarioId, status: 'published', deletedAt: null },
-      include: {
-        museum: { select: { id: true, isActive: true, settings: true } },
-      },
+      include: { museum: { select: { id: true, isActive: true, settings: true } } },
     });
 
     if (!scenario) {
@@ -84,7 +104,6 @@ export class GameService {
       );
     }
 
-    // UC-GE04: Reject if the player already has an active session in this museum
     if (userId) {
       const existing = await this.prisma.gameSession.findFirst({
         where: { userId, museumId: scenario.museumId, state: { in: ACTIVE_STATES } },
@@ -92,7 +111,7 @@ export class GameService {
       });
       if (existing) {
         throw new ApiException(
-          'You already have an active game session. Complete or wait for it to expire before starting a new one.',
+          'You already have an active game session. Complete or wait for it to expire.',
           ErrorCode.GAME_SESSION_ALREADY_ACTIVE,
           HttpStatus.CONFLICT,
         );
@@ -113,13 +132,11 @@ export class GameService {
     });
 
     this.logger.log(
-      `Game session created: ${session.id} for scenario ${scenario.id} (userId=${userId ?? 'guest'})`,
+      `Game session created: ${session.id} (scenario=${scenario.id}, userId=${userId ?? 'guest'})`,
     );
 
     return this.buildSessionState(
-      session,
-      scenario.storyIntro,
-      scenario.clues as unknown as Clue[],
+      { ...session, scenario: { storyIntro: scenario.storyIntro, clues: scenario.clues, finalCode: scenario.finalCode }, museum: { settings: scenario.museum.settings } },
       settings,
     );
   }
@@ -131,35 +148,243 @@ export class GameService {
     userId: string | null,
     guestTokenJti: string | null,
   ): Promise<SessionStateDto> {
-    const session = await this.prisma.gameSession.findFirst({
-      where: { id: sessionId },
-      include: {
-        scenario: { select: { storyIntro: true, clues: true } },
-        museum: { select: { settings: true } },
-      },
-    });
+    const session = await this.loadSession(sessionId);
+    this.assertOwnership(session, userId, guestTokenJti);
+    return this.buildSessionState(session, session.museum.settings as unknown as MuseumSettings);
+  }
 
-    if (!session) {
+  // ── QR Scan (S5-03) ───────────────────────────────────────────────────────
+
+  async scanClue(
+    sessionId: string,
+    dto: ScanClueDto,
+    userId: string | null,
+    guestTokenJti: string | null,
+  ): Promise<SessionStateDto> {
+    const session = await this.loadSession(sessionId);
+    this.assertOwnership(session, userId, guestTokenJti);
+    this.assertNotTerminal(session);
+
+    if (session.state !== GameState.CLUE_ACTIVE) {
       throw new ApiException(
-        'Game session not found.',
-        ErrorCode.GAME_SESSION_NOT_FOUND,
-        HttpStatus.NOT_FOUND,
+        'QR scan is only valid when a clue is active.',
+        ErrorCode.GAME_INVALID_STATE,
+        HttpStatus.CONFLICT,
       );
     }
 
-    this.assertOwnership(session, userId, guestTokenJti);
-
     const settings = session.museum.settings as unknown as MuseumSettings;
+    const clues = session.scenario.clues as unknown as Clue[];
+    const currentClue = clues[session.currentClueIndex];
+
+    if (!currentClue) {
+      throw new ApiException(
+        'No active clue found for this session.',
+        ErrorCode.GAME_INVALID_STATE,
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+
+    const qrRecord = await this.prisma.qrCode.findUnique({
+      where: { codeHash: dto.codeHash },
+      select: { id: true, artifactId: true, museumId: true, isActive: true },
+    });
+
+    if (!qrRecord || qrRecord.museumId !== session.museumId) {
+      // Wrong museum or non-existent QR — counts as incorrect attempt (UC-GE02)
+      return this.handleWrongScan(session, settings, clues);
+    }
+
+    if (!qrRecord.isActive) {
+      throw new ApiException(
+        'This QR code has been deactivated.',
+        ErrorCode.QR_DEACTIVATED,
+        HttpStatus.GONE,
+      );
+    }
+
+    // UC-GE11: correct artifact but belongs to a future/past clue in the same scenario
+    const isInScenario = clues.some((c) => c.artifactId === qrRecord.artifactId);
+    if (isInScenario && qrRecord.artifactId !== currentClue.artifactId) {
+      throw new ApiException(
+        "You found the right artifact, but it's not time for this clue yet! Check your current clue hint.",
+        ErrorCode.GAME_CLUE_MISMATCH,
+        HttpStatus.UNPROCESSABLE_ENTITY,
+      );
+    }
+
+    if (qrRecord.artifactId !== currentClue.artifactId) {
+      // Wrong artifact entirely — counts as incorrect attempt (UC-GE02)
+      return this.handleWrongScan(session, settings, clues);
+    }
+
+    // Correct QR: transition to QR_SCANNED, reveal question
+    const updated = await this.prisma.gameSession.update({
+      where: { id: session.id },
+      data: { state: GameState.QR_SCANNED },
+    });
 
     return this.buildSessionState(
-      session,
-      session.scenario.storyIntro,
-      session.scenario.clues as unknown as Clue[],
+      { ...session, ...updated, scenario: session.scenario, museum: session.museum },
       settings,
     );
   }
 
-  // ── Internal Helpers ──────────────────────────────────────────────────────
+  // ── Answer Submission (S5-04 + S5-05 + S5-06) ────────────────────────────
+
+  async submitAnswer(
+    sessionId: string,
+    dto: SubmitAnswerDto,
+    userId: string | null,
+    guestTokenJti: string | null,
+  ): Promise<SessionStateDto> {
+    const session = await this.loadSession(sessionId);
+    this.assertOwnership(session, userId, guestTokenJti);
+    this.assertNotTerminal(session);
+
+    if (session.state !== GameState.QR_SCANNED && session.state !== GameState.INCORRECT) {
+      throw new ApiException(
+        'Answer submission requires the QR to be scanned first.',
+        ErrorCode.GAME_INVALID_STATE,
+        HttpStatus.CONFLICT,
+      );
+    }
+
+    const settings = session.museum.settings as unknown as MuseumSettings;
+    const clues = session.scenario.clues as unknown as Clue[];
+    const currentClue = clues[session.currentClueIndex]!;
+    const maxAttempts = settings?.limits?.maxAnswerAttemptsPerClue ?? 3;
+
+    const correctIndex = currentClue.question.options.findIndex((o) => o.isCorrect);
+    const isCorrect = dto.selectedOption === correctIndex;
+
+    if (isCorrect) {
+      const points = this.calculateScore(dto.timeSpentMs, settings);
+      return this.advanceClue(session, clues, points, settings);
+    }
+
+    // Wrong answer
+    const newAttempts = session.attemptsOnCurrentClue + 1;
+
+    if (newAttempts >= maxAttempts) {
+      // S5-06: Force-skip with 0 points
+      return this.forceSkipClue(session, clues, settings);
+    }
+
+    // Stay INCORRECT — hint will be revealed once hintRevealOnAttempt threshold met
+    const updated = await this.prisma.gameSession.update({
+      where: { id: session.id },
+      data: { state: GameState.INCORRECT, attemptsOnCurrentClue: newAttempts },
+    });
+
+    return this.buildSessionState(
+      { ...session, ...updated, scenario: session.scenario, museum: session.museum },
+      settings,
+    );
+  }
+
+  // ── Internal: advance or force-skip ──────────────────────────────────────
+
+  private async advanceClue(
+    session: SessionRow,
+    clues: Clue[],
+    earnedPoints: number,
+    settings: MuseumSettings,
+  ): Promise<SessionStateDto> {
+    const nextIndex = session.currentClueIndex + 1;
+    const isLastClue = nextIndex >= clues.length;
+
+    const updated = await this.prisma.gameSession.update({
+      where: { id: session.id },
+      data: {
+        state: isLastClue ? GameState.FINAL_CODE : GameState.CLUE_ACTIVE,
+        currentClueIndex: isLastClue ? session.currentClueIndex : nextIndex,
+        score: session.score + earnedPoints,
+        attemptsOnCurrentClue: 0,
+      },
+    });
+
+    this.logger.log(
+      `Session ${session.id}: clue ${session.currentClueIndex} correct (+${earnedPoints}pts). ` +
+        (isLastClue ? 'Entering FINAL_CODE.' : `Next clue: ${nextIndex}.`),
+    );
+
+    return this.buildSessionState(
+      { ...session, ...updated, scenario: session.scenario, museum: session.museum },
+      settings,
+    );
+  }
+
+  private async forceSkipClue(
+    session: SessionRow,
+    clues: Clue[],
+    settings: MuseumSettings,
+  ): Promise<SessionStateDto> {
+    const nextIndex = session.currentClueIndex + 1;
+    const isLastClue = nextIndex >= clues.length;
+
+    const updated = await this.prisma.gameSession.update({
+      where: { id: session.id },
+      data: {
+        state: isLastClue ? GameState.FINAL_CODE : GameState.CLUE_ACTIVE,
+        currentClueIndex: isLastClue ? session.currentClueIndex : nextIndex,
+        attemptsOnCurrentClue: 0,
+        // score unchanged — 0 points for skipped clue
+      },
+    });
+
+    this.logger.log(
+      `Session ${session.id}: clue ${session.currentClueIndex} force-skipped (0 pts). ` +
+        (isLastClue ? 'Entering FINAL_CODE.' : `Next clue: ${nextIndex}.`),
+    );
+
+    return this.buildSessionState(
+      { ...session, ...updated, scenario: session.scenario, museum: session.museum },
+      settings,
+    );
+  }
+
+  private async handleWrongScan(
+    session: SessionRow,
+    settings: MuseumSettings,
+    clues: Clue[],
+  ): Promise<SessionStateDto> {
+    const maxAttempts = settings?.limits?.maxAnswerAttemptsPerClue ?? 3;
+    const newAttempts = session.attemptsOnCurrentClue + 1;
+
+    if (newAttempts >= maxAttempts) {
+      return this.forceSkipClue(session, clues, settings);
+    }
+
+    const updated = await this.prisma.gameSession.update({
+      where: { id: session.id },
+      data: { attemptsOnCurrentClue: newAttempts },
+    });
+
+    throw new ApiException(
+      'Wrong QR code scanned. This counts as an incorrect attempt.',
+      ErrorCode.GAME_WRONG_ARTIFACT,
+      HttpStatus.UNPROCESSABLE_ENTITY,
+    );
+  }
+
+  // ── Scoring ───────────────────────────────────────────────────────────────
+
+  private calculateScore(timeSpentMs: number, settings: MuseumSettings): number {
+    const limits = settings?.limits;
+    const timerMs = (limits?.gameClueTimerSeconds ?? 60) * 1000;
+    const timeBonusMax = limits?.timeBonusMax ?? 10;
+    const timeBonusEnabled = limits?.timeBonusEnabled ?? true;
+
+    const clampedTime = Math.min(timeSpentMs, timerMs);
+    const bonus = timeBonusEnabled
+      ? Math.floor(timeBonusMax * (1 - clampedTime / timerMs))
+      : 0;
+
+    return CLUE_BASE_SCORE + bonus;
+  }
+
+  // ── Guard helpers ─────────────────────────────────────────────────────────
 
   assertOwnership(
     session: { userId: string | null; guestTokenJti: string | null },
@@ -179,36 +404,65 @@ export class GameService {
     }
   }
 
-  buildSessionState(
-    session: {
-      id: string;
-      state: GameState;
-      scenarioId: string;
-      currentClueIndex: number;
-      score: number;
-      attemptsOnCurrentClue: number;
-      completedAt: Date | null;
-      createdAt: Date;
-      updatedAt: Date;
-    },
-    storyIntro: string,
-    clues: Clue[],
-    settings: MuseumSettings,
-  ): SessionStateDto {
-    const isFirstClueStep = session.currentClueIndex === 0;
+  assertNotTerminal(session: { state: GameState }): void {
+    if (session.state === GameState.EXPIRED) {
+      throw new ApiException(
+        'This game session has expired.',
+        ErrorCode.GAME_SESSION_EXPIRED,
+        HttpStatus.GONE,
+      );
+    }
+    if (session.state === GameState.COMPLETED) {
+      throw new ApiException(
+        'This game session is already completed.',
+        ErrorCode.GAME_SESSION_COMPLETED,
+        HttpStatus.CONFLICT,
+      );
+    }
+  }
+
+  // ── Session loader ────────────────────────────────────────────────────────
+
+  async loadSession(sessionId: string): Promise<SessionRow> {
+    const session = await this.prisma.gameSession.findFirst({
+      where: { id: sessionId },
+      include: {
+        scenario: { select: { storyIntro: true, clues: true, finalCode: true } },
+        museum: { select: { settings: true } },
+      },
+    });
+
+    if (!session) {
+      throw new ApiException(
+        'Game session not found.',
+        ErrorCode.GAME_SESSION_NOT_FOUND,
+        HttpStatus.NOT_FOUND,
+      );
+    }
+
+    return session as unknown as SessionRow;
+  }
+
+  // ── Response builder ──────────────────────────────────────────────────────
+
+  buildSessionState(session: SessionRow, settings: MuseumSettings): SessionStateDto {
+    const clues = session.scenario.clues as unknown as Clue[];
+    const isFirstClue = session.currentClueIndex === 0;
     const currentClue = clues[session.currentClueIndex] ?? null;
     const showQuestion = QUESTION_VISIBLE_STATES.includes(session.state);
-    const hintRevealThreshold = settings?.limits?.hintRevealOnAttempt ?? 2;
+    const hintRevealAt = settings?.limits?.hintRevealOnAttempt ?? 2;
 
     let clueDto: CurrentClueDto | null = null;
     if (currentClue && session.state !== GameState.COMPLETED && session.state !== GameState.EXPIRED) {
       let questionDto: ClueQuestionDto | null = null;
       if (showQuestion) {
-        const hintVisible = session.attemptsOnCurrentClue >= hintRevealThreshold;
         questionDto = {
           text: currentClue.question.text,
           options: currentClue.question.options.map((o) => o.text),
-          hint: hintVisible ? currentClue.question.hintText : null,
+          hint:
+            session.attemptsOnCurrentClue >= hintRevealAt
+              ? currentClue.question.hintText
+              : null,
         };
       }
 
@@ -228,7 +482,7 @@ export class GameService {
       totalClues: clues.length,
       score: session.score,
       attemptsOnCurrentClue: session.attemptsOnCurrentClue,
-      storyIntro: isFirstClueStep ? storyIntro : null,
+      storyIntro: isFirstClue ? session.scenario.storyIntro : null,
       currentClue: clueDto,
       completedAt: session.completedAt,
       createdAt: session.createdAt,

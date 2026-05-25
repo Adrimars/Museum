@@ -14,6 +14,8 @@ import { CurrentUser, type JwtPayload } from '../../common/decorators/current-us
 import { Public } from '../../common/decorators/public.decorator';
 import { GameService } from './game.service';
 import { CreateSessionDto } from './dto/create-session.dto';
+import { ScanClueDto } from './dto/scan-clue.dto';
+import { SubmitAnswerDto } from './dto/submit-answer.dto';
 import type { GuestTokenResponseDto } from './dto/guest-token.dto';
 import type { SessionStateDto } from './dto/session-state.dto';
 
@@ -42,8 +44,7 @@ export class GameController {
     @Body() dto: CreateSessionDto,
     @CurrentUser() user: JwtPayload,
   ): Promise<SessionStateDto> {
-    const userId = user.role === 'guest' ? null : user.sub;
-    const guestJti = user.role === 'guest' ? (user.jti ?? null) : null;
+    const { userId, guestJti } = this.extractActor(user);
     return this.gameService.createSession(dto, userId, guestJti);
   }
 
@@ -54,8 +55,42 @@ export class GameController {
     @Param('id', ParseUUIDPipe) sessionId: string,
     @CurrentUser() user: JwtPayload,
   ): Promise<SessionStateDto> {
-    const userId = user.role === 'guest' ? null : user.sub;
-    const guestJti = user.role === 'guest' ? (user.jti ?? null) : null;
+    const { userId, guestJti } = this.extractActor(user);
     return this.gameService.getSession(sessionId, userId, guestJti);
+  }
+
+  @Post('sessions/:id/scan')
+  @ApiBearerAuth()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Validate a scanned QR code against the current clue (S5-03)' })
+  scanClue(
+    @Param('id', ParseUUIDPipe) sessionId: string,
+    @Body() dto: ScanClueDto,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<SessionStateDto> {
+    const { userId, guestJti } = this.extractActor(user);
+    return this.gameService.scanClue(sessionId, dto, userId, guestJti);
+  }
+
+  @Post('sessions/:id/answer')
+  @ApiBearerAuth()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Submit an answer for the current clue question (S5-04/S5-05/S5-06)' })
+  submitAnswer(
+    @Param('id', ParseUUIDPipe) sessionId: string,
+    @Body() dto: SubmitAnswerDto,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<SessionStateDto> {
+    const { userId, guestJti } = this.extractActor(user);
+    return this.gameService.submitAnswer(sessionId, dto, userId, guestJti);
+  }
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
+
+  private extractActor(user: JwtPayload): { userId: string | null; guestJti: string | null } {
+    return {
+      userId: user.role === 'guest' ? null : user.sub,
+      guestJti: user.role === 'guest' ? (user.jti ?? null) : null,
+    };
   }
 }
