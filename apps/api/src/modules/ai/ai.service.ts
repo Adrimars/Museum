@@ -88,6 +88,17 @@ export class AiService {
     return session;
   }
 
+  // ── S7-04: Redis sliding window rate limiter ──────────────────────────────
+
+  private async checkRateLimit(userId: string, limitPerMinute: number): Promise<boolean> {
+    const windowKey = `ai_rate:${userId}:${Math.floor(Date.now() / 60_000)}`;
+    const count = await this.redis.incr(windowKey);
+    if (count === 1) {
+      await this.redis.expire(windowKey, 120); // 2-min TTL for the sliding window
+    }
+    return count > limitPerMinute;
+  }
+
   // ── S7-08: Museum-level AI disabled gate (also used by streamMessage) ─────
 
   enforceAiEnabled(settings: MuseumSettings): void {
@@ -123,6 +134,30 @@ export class AiService {
     // S7-08: AI enabled check (also enforced on createSession, duplicated here for WS path)
     if (!settings.ai_config?.isEnabled) {
       client.emit('ai:error', { errorCode: ErrorCode.AI_DISABLED, message: 'AI assistant is disabled for this museum.' });
+      return;
+    }
+
+    // ── S7-04: Rate limit — Redis sliding window (per user, per minute) ───────
+    const rateLimitHit = await this.checkRateLimit(
+      user.sub,
+      settings.limits.aiRateLimitPerMinute ?? 3,
+    );
+    if (rateLimitHit) {
+      client.emit('ai:error', {
+        errorCode: ErrorCode.AI_RATE_LIMIT_EXCEEDED,
+        message: 'Rate limit exceeded. Please wait before sending another message.',
+      });
+      return;
+    }
+
+    // ── S7-05: Max conversation turns ────────────────────────────────────────
+    const turnCount = await this.prisma.aiMessage.count({ where: { sessionId } });
+    const maxTurns = (settings.limits.maxAiTurnsPerSession ?? 10) * 2; // user + assistant per turn
+    if (turnCount >= maxTurns) {
+      client.emit('ai:error', {
+        errorCode: ErrorCode.AI_MAX_TURNS_EXCEEDED,
+        message: 'Maximum conversation turns reached for this session.',
+      });
       return;
     }
 
