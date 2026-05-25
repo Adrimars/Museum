@@ -3,6 +3,7 @@ import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AiFlagStatus } from '@prisma/client';
 import type Redis from 'ioredis';
+import OpenAI from 'openai';
 
 import type { JwtPayload } from '../../common/decorators/current-user.decorator';
 import { ErrorCode } from '../../common/errors/error-codes';
@@ -17,9 +18,8 @@ import type { CreateChatSessionDto } from './dto/create-chat-session.dto';
 export class AiService {
   private readonly logger = new Logger(AiService.name);
 
-  // Anthropic client initialised lazily by downstream tasks; declared here so
-  // later commits can extend without reconstructing the class.
   readonly anthropic: Anthropic;
+  readonly openai: OpenAI;
   readonly model: string;
 
   constructor(
@@ -30,6 +30,7 @@ export class AiService {
     this.anthropic = new Anthropic({
       apiKey: config.get<string>('anthropic.apiKey', ''),
     });
+    this.openai = new OpenAI({ apiKey: config.get<string>('openai.apiKey', '') });
     this.model = config.get<string>('anthropic.model', 'claude-sonnet-4-6');
   }
 
@@ -94,6 +95,59 @@ export class AiService {
         ErrorCode.AI_DISABLED,
         HttpStatus.FORBIDDEN,
       );
+    }
+  }
+
+  // ── S7-02: Embed a text query using OpenAI text-embedding-3-small ─────────
+
+  async embedText(text: string): Promise<number[]> {
+    const response = await this.openai.embeddings.create({
+      model: 'text-embedding-3-small',
+      input: text.slice(0, 8_000),
+    });
+    return response.data[0]!.embedding;
+  }
+
+  // ── S7-02: pgvector cosine similarity retrieval — top-3 artifact chunks ──
+
+  async retrieveContext(
+    museumId: string,
+    queryVector: number[],
+    excludeArtifactId?: string,
+  ): Promise<Array<{ name: string; description: string | null; historicalContext: string | null }>> {
+    type Row = { name: string; description: string | null; historical_context: string | null };
+    const vectorStr = `[${queryVector.join(',')}]`;
+
+    try {
+      const rows = excludeArtifactId
+        ? await this.prisma.$queryRaw<Row[]>`
+            SELECT name, description, historical_context
+            FROM artifacts
+            WHERE museum_id = ${museumId}::uuid
+              AND deleted_at IS NULL
+              AND embedding IS NOT NULL
+              AND id != ${excludeArtifactId}::uuid
+            ORDER BY embedding <=> ${vectorStr}::vector
+            LIMIT 3
+          `
+        : await this.prisma.$queryRaw<Row[]>`
+            SELECT name, description, historical_context
+            FROM artifacts
+            WHERE museum_id = ${museumId}::uuid
+              AND deleted_at IS NULL
+              AND embedding IS NOT NULL
+            ORDER BY embedding <=> ${vectorStr}::vector
+            LIMIT 3
+          `;
+
+      return rows.map((r) => ({
+        name: r.name,
+        description: r.description,
+        historicalContext: r.historical_context,
+      }));
+    } catch (err) {
+      this.logger.warn('RAG retrieval failed — proceeding without context', { err });
+      return [];
     }
   }
 
