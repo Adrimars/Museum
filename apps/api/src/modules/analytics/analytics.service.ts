@@ -137,6 +137,50 @@ export class AnalyticsService {
 
     return results;
   }
+
+  // ── S7-15: Nightly user segmentation across all museums ───────────────────
+  // Tiers (30-day event count): highly_engaged ≥10, engaged 5-9, passive 1-4, churned 0
+
+  async runUserSegmentation(): Promise<SegmentSummary[]> {
+    const from = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+    const rows = await this.prisma.$queryRaw<
+      Array<{ museum_id: string; user_id_hash: string; event_count: bigint }>
+    >`
+      SELECT museum_id::text, user_id_hash, COUNT(*) AS event_count
+      FROM analytics_events
+      WHERE occurred_at >= ${from}
+        AND user_id_hash IS NOT NULL
+      GROUP BY museum_id, user_id_hash
+    `;
+
+    const byMuseum = new Map<string, SegmentSummary>();
+    for (const row of rows) {
+      if (!byMuseum.has(row.museum_id)) {
+        byMuseum.set(row.museum_id, {
+          museum_id: row.museum_id, highly_engaged: 0, engaged: 0, passive: 0, churned: 0, total_users: 0,
+        });
+      }
+      const s = byMuseum.get(row.museum_id)!;
+      const n = Number(row.event_count);
+      s.total_users++;
+      if (n >= 10)     s.highly_engaged++;
+      else if (n >= 5) s.engaged++;
+      else if (n >= 1) s.passive++;
+      else             s.churned++;
+    }
+
+    return [...byMuseum.values()];
+  }
+}
+
+export interface SegmentSummary {
+  museum_id:      string;
+  highly_engaged: number;
+  engaged:        number;
+  passive:        number;
+  churned:        number;
+  total_users:    number;
 }
 
 export interface FunnelStep {
