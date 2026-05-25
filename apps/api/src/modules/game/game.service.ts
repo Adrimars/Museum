@@ -2,22 +2,24 @@ import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
 import { ContentStatus, GameState } from '@prisma/client';
 import type Redis from 'ioredis';
 
-import { ApiException } from '../../common/exceptions/api.exception';
+import type { JwtPayload } from '../../common/decorators/current-user.decorator';
 import { ErrorCode } from '../../common/errors/error-codes';
+import { ApiException } from '../../common/exceptions/api.exception';
 import { PrismaService } from '../../prisma/prisma.service';
 import { REDIS_CLIENT } from '../../redis/redis.module';
 import { TokenService } from '../auth/token.service';
-import type { Clue, MuseumSettings } from './types/game.types';
+
+import type { CreateScenarioDto } from './dto/create-scenario.dto';
 import type { CreateSessionDto } from './dto/create-session.dto';
 import type { GuestTokenResponseDto } from './dto/guest-token.dto';
-import type { ScanClueDto } from './dto/scan-clue.dto';
-import type { SubmitAnswerDto } from './dto/submit-answer.dto';
-import type { VerifyFinalCodeDto } from './dto/verify-final-code.dto';
-import type { CreateScenarioDto } from './dto/create-scenario.dto';
-import type { UpdateScenarioDto } from './dto/update-scenario.dto';
 import type { ListScenariosDto } from './dto/list-scenarios.dto';
+import type { ScanClueDto } from './dto/scan-clue.dto';
 import type { SessionStateDto, CurrentClueDto, ClueQuestionDto } from './dto/session-state.dto';
-import type { JwtPayload } from '../../common/decorators/current-user.decorator';
+import type { SubmitAnswerDto } from './dto/submit-answer.dto';
+import type { UpdateScenarioDto } from './dto/update-scenario.dto';
+import type { VerifyFinalCodeDto } from './dto/verify-final-code.dto';
+import type { Clue, MuseumSettings } from './types/game.types';
+
 
 /** States that represent an in-progress (non-terminal) session. */
 const ACTIVE_STATES: GameState[] = [
@@ -201,7 +203,7 @@ export class GameService {
       select: { id: true, artifactId: true, museumId: true, isActive: true },
     });
 
-    if (!qrRecord || qrRecord.museumId !== session.museumId) {
+    if (qrRecord?.museumId !== session.museumId) {
       // Wrong museum or non-existent QR — counts as incorrect attempt (UC-GE02)
       return this.handleWrongScan(session, settings, clues);
     }

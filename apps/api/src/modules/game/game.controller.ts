@@ -17,16 +17,17 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, type JwtPayload } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
-import { GameService } from './game.service';
+
 import { CreateScenarioDto } from './dto/create-scenario.dto';
-import { UpdateScenarioDto } from './dto/update-scenario.dto';
-import { ListScenariosDto } from './dto/list-scenarios.dto';
 import { CreateSessionDto } from './dto/create-session.dto';
-import { ScanClueDto } from './dto/scan-clue.dto';
-import { SubmitAnswerDto } from './dto/submit-answer.dto';
-import { VerifyFinalCodeDto } from './dto/verify-final-code.dto';
 import type { GuestTokenResponseDto } from './dto/guest-token.dto';
+import { ListScenariosDto } from './dto/list-scenarios.dto';
+import { ScanClueDto } from './dto/scan-clue.dto';
 import type { SessionStateDto } from './dto/session-state.dto';
+import { SubmitAnswerDto } from './dto/submit-answer.dto';
+import { UpdateScenarioDto } from './dto/update-scenario.dto';
+import { VerifyFinalCodeDto } from './dto/verify-final-code.dto';
+import { GameService } from './game.service';
 
 @ApiTags('game')
 @Controller('game')

@@ -1,5 +1,5 @@
-import { Logger } from '@nestjs/common';
 import { Process, Processor } from '@nestjs/bull';
+import { Logger } from '@nestjs/common';
 import type { Job } from 'bull';
 import sharp from 'sharp';
 

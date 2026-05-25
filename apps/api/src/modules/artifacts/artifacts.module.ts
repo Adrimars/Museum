@@ -2,6 +2,7 @@ import { BullModule } from '@nestjs/bull';
 import { Module } from '@nestjs/common';
 
 import { QrModule } from '../qr/qr.module';
+
 import { ArtifactsController } from './artifacts.controller';
 import { ArtifactsService } from './artifacts.service';
 import { EmbeddingService, ARTIFACT_EMBEDDING_QUEUE } from './embedding.service';

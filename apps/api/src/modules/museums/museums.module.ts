@@ -1,6 +1,7 @@
 import { MiddlewareConsumer, Module, NestModule, RequestMethod } from '@nestjs/common';
 
 import { MuseumTenantMiddleware } from '../../common/middleware/museum-tenant.middleware';
+
 import { MuseumsController } from './museums.controller';
 import { MuseumsService } from './museums.service';
 

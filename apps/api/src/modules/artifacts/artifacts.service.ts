@@ -1,21 +1,22 @@
+import { InjectQueue } from '@nestjs/bull';
 import {
   ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectQueue } from '@nestjs/bull';
-import type { Queue } from 'bull';
 import { Prisma } from '@prisma/client';
+import type { Queue } from 'bull';
 
 import type { JwtPayload } from '../../common/decorators/current-user.decorator';
 import { ErrorCode } from '../../common/errors/error-codes';
 import { PrismaService } from '../../prisma/prisma.service';
 import { QrService } from '../qr/qr.service';
+
 import type { CreateArtifactDto } from './dto/create-artifact.dto';
-import { EmbeddingService, ARTIFACT_EMBEDDING_QUEUE, type ArtifactEmbeddingJob } from './embedding.service';
 import type { ListArtifactsDto } from './dto/list-artifacts.dto';
 import type { UpdateArtifactDto } from './dto/update-artifact.dto';
+import { EmbeddingService, ARTIFACT_EMBEDDING_QUEUE, type ArtifactEmbeddingJob } from './embedding.service';
 
 // Fields whose changes must re-trigger the embedding pipeline (Sprint 4).
 const EMBEDDING_FIELDS = ['name', 'description', 'historicalContext'] as const;

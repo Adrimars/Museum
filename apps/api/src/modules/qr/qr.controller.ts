@@ -21,6 +21,7 @@ import { CurrentUser, type JwtPayload } from '../../common/decorators/current-us
 import { Public } from '../../common/decorators/public.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+
 import { BulkGenerateQrDto } from './dto/bulk-generate-qr.dto';
 import { ValidateQrDto } from './dto/validate-qr.dto';
 import { QrService } from './qr.service';

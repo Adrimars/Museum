@@ -1,12 +1,13 @@
+import { createHash, randomBytes } from 'crypto';
+
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { createHash, randomBytes } from 'crypto';
 import Redis from 'ioredis';
 import { v4 as uuidv4 } from 'uuid';
 
-import { REDIS_CLIENT } from '../../redis/redis.module';
 import { PrismaService } from '../../prisma/prisma.service';
+import { REDIS_CLIENT } from '../../redis/redis.module';
 
 export interface JwtAccessPayload {
   sub: string;

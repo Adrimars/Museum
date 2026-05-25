@@ -1,15 +1,15 @@
 import { Readable, PassThrough } from 'node:stream';
 
-import { Logger, Inject } from '@nestjs/common';
 import { Process, Processor } from '@nestjs/bull';
+import { Logger, Inject } from '@nestjs/common';
+import * as archiver from 'archiver';
 import type { Job } from 'bull';
 import type Redis from 'ioredis';
-import * as archiver from 'archiver';
 import * as QRCode from 'qrcode';
 
 import { PrismaService } from '../../../prisma/prisma.service';
-import { StorageService } from '../../storage/storage.service';
 import { REDIS_CLIENT } from '../../../redis/redis.module';
+import { StorageService } from '../../storage/storage.service';
 
 export const QR_BULK_GENERATE_QUEUE = 'qr-bulk-generate';
 

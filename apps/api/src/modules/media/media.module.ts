@@ -2,6 +2,7 @@ import { BullModule } from '@nestjs/bull';
 import { Module } from '@nestjs/common';
 
 import { StorageModule } from '../storage/storage.module';
+
 import { MediaController } from './media.controller';
 import { MediaService, IMAGE_OPTIMIZATION_QUEUE } from './media.service';
 import { ImageOptimizationProcessor } from './processors/image-optimization.processor';

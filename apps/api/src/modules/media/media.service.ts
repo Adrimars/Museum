@@ -1,13 +1,14 @@
 import * as path from 'node:path';
 
-import { BadRequestException, ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
+import { BadRequestException, ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import type { Queue } from 'bull';
 import { v4 as uuidv4 } from 'uuid';
 
-import { ErrorCode } from '../../common/errors/error-codes';
 import type { JwtPayload } from '../../common/decorators/current-user.decorator';
+import { ErrorCode } from '../../common/errors/error-codes';
 import { StorageService } from '../storage/storage.service';
+
 import {
   ACCEPTED_MIME_TYPES,
   MAX_SIZES,

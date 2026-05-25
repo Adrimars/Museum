@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Difficulty } from '@prisma/client';
 import { Type } from 'class-transformer';
 import {
   IsArray,
@@ -10,7 +11,6 @@ import {
   MinLength,
   ValidateNested,
 } from 'class-validator';
-import { Difficulty } from '@prisma/client';
 
 export class ClueOptionDto {
   @ApiProperty()

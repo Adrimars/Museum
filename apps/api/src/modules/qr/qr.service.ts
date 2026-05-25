@@ -1,5 +1,6 @@
 import { createHmac, createHash, timingSafeEqual } from 'node:crypto';
 
+import { InjectQueue } from '@nestjs/bull';
 import {
   BadRequestException,
   ForbiddenException,
@@ -10,23 +11,23 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { InjectQueue } from '@nestjs/bull';
-import type { Queue } from 'bull';
 import { ConfigService } from '@nestjs/config';
+import type { Queue } from 'bull';
 import type Redis from 'ioredis';
 import * as QRCode from 'qrcode';
 
 import type { JwtPayload } from '../../common/decorators/current-user.decorator';
 import { ErrorCode } from '../../common/errors/error-codes';
+import type { QrHmacKey } from '../../config/qr.config';
 import { PrismaService } from '../../prisma/prisma.service';
 import { REDIS_CLIENT } from '../../redis/redis.module';
 import { StorageService } from '../storage/storage.service';
-import type { QrHmacKey } from '../../config/qr.config';
+
+import type { BulkGenerateQrDto } from './dto/bulk-generate-qr.dto';
 import {
   QR_BULK_GENERATE_QUEUE,
   type QrBulkGenerateJob,
 } from './processors/qr-bulk-generate.processor';
-import type { BulkGenerateQrDto } from './dto/bulk-generate-qr.dto';
 
 @Injectable()
 export class QrService {

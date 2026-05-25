@@ -24,6 +24,7 @@ import { CurrentUser, type JwtPayload } from '../../common/decorators/current-us
 import { Public } from '../../common/decorators/public.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+
 import { ArtifactsService } from './artifacts.service';
 import { CreateArtifactDto } from './dto/create-artifact.dto';
 import { ListArtifactsDto } from './dto/list-artifacts.dto';
