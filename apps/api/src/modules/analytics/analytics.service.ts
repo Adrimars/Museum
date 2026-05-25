@@ -124,7 +124,7 @@ export class AnalyticsService {
 
       const steps: FunnelStep[] = funnel.steps.map((step, idx) => {
         const count = countByEvent.get(step) ?? 0;
-        const prevCount = idx === 0 ? count : (countByEvent.get(funnel.steps[idx - 1]) ?? 0);
+        const prevCount = idx === 0 ? count : (countByEvent.get(funnel.steps[idx - 1]!) ?? 0);
         return {
           eventType:      step,
           uniqueUsers:    count,

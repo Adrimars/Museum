@@ -15,6 +15,15 @@
     "noAccount": "Hesabın yok mu?",
     "hasAccount": "Zaten hesabın var mı?"
   },
+  "ai": {
+    "chatTitle": "Müze Yapay Zeka Rehberi",
+    "connected": "Bağlı",
+    "connecting": "Bağlanıyor...",
+    "startPrompt": "Müzenin eserleri hakkında her şeyi sorabilirsiniz!",
+    "inputPlaceholder": "Sorunuzu yazın...",
+    "send": "Gönder",
+    "invalidSession": "Geçersiz sohbet oturumu."
+  },
   "errors": {
     "required": "Bu alan zorunludur",
     "invalidEmail": "Geçerli bir e-posta adresi girin",
