@@ -1,7 +1,9 @@
 import { BadRequestException, ForbiddenException, GoneException, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { getQueueToken } from '@nestjs/bull';
 import { Test } from '@nestjs/testing';
 
+import { REDIS_CLIENT } from '../../redis/redis.module';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
 import { QrService } from './qr.service';
@@ -43,6 +45,8 @@ describe('QrService', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: StorageService, useValue: mockStorage },
         { provide: ConfigService, useValue: mockConfig },
+        { provide: getQueueToken('qr-bulk-generate'), useValue: { add: jest.fn() } },
+        { provide: REDIS_CLIENT, useValue: { get: jest.fn(), set: jest.fn(), del: jest.fn() } },
       ],
     }).compile();
     service = module.get(QrService);

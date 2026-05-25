@@ -1,9 +1,11 @@
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { getQueueToken } from '@nestjs/bull';
 import { Test } from '@nestjs/testing';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { QrService } from '../qr/qr.service';
 import { ArtifactsService } from './artifacts.service';
+import { EmbeddingService } from './embedding.service';
 
 const mockPrisma = {
   museum: { findUnique: jest.fn() },
@@ -24,6 +26,7 @@ const mockPrisma = {
 };
 
 const mockQrService = { generateForArtifact: jest.fn().mockResolvedValue(undefined) };
+const mockEmbeddingService = { embedArtifact: jest.fn().mockResolvedValue(undefined) };
 
 const superAdmin = { sub: 'user-1', role: 'super_admin' as const, museumId: undefined as unknown as string, iat: 0, exp: 0 };
 const museumAdmin = { sub: 'user-2', role: 'museum_admin' as const, museumId: 'museum-uuid', iat: 0, exp: 0 };
@@ -39,6 +42,8 @@ describe('ArtifactsService', () => {
         ArtifactsService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: QrService, useValue: mockQrService },
+        { provide: EmbeddingService, useValue: mockEmbeddingService },
+        { provide: getQueueToken('artifact-embedding'), useValue: { add: jest.fn() } },
       ],
     }).compile();
     service = module.get(ArtifactsService);
