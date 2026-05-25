@@ -16,6 +16,7 @@ import { GameService } from './game.service';
 import { CreateSessionDto } from './dto/create-session.dto';
 import { ScanClueDto } from './dto/scan-clue.dto';
 import { SubmitAnswerDto } from './dto/submit-answer.dto';
+import { VerifyFinalCodeDto } from './dto/verify-final-code.dto';
 import type { GuestTokenResponseDto } from './dto/guest-token.dto';
 import type { SessionStateDto } from './dto/session-state.dto';
 
@@ -83,6 +84,19 @@ export class GameController {
   ): Promise<SessionStateDto> {
     const { userId, guestJti } = this.extractActor(user);
     return this.gameService.submitAnswer(sessionId, dto, userId, guestJti);
+  }
+
+  @Post('sessions/:id/verify-final-code')
+  @ApiBearerAuth()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Verify the final code to complete the treasure hunt (S5-07)' })
+  verifyFinalCode(
+    @Param('id', ParseUUIDPipe) sessionId: string,
+    @Body() dto: VerifyFinalCodeDto,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<SessionStateDto> {
+    const { userId, guestJti } = this.extractActor(user);
+    return this.gameService.verifyFinalCode(sessionId, dto, userId, guestJti);
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────

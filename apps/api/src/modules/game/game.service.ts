@@ -10,6 +10,7 @@ import type { CreateSessionDto } from './dto/create-session.dto';
 import type { GuestTokenResponseDto } from './dto/guest-token.dto';
 import type { ScanClueDto } from './dto/scan-clue.dto';
 import type { SubmitAnswerDto } from './dto/submit-answer.dto';
+import type { VerifyFinalCodeDto } from './dto/verify-final-code.dto';
 import type { SessionStateDto, CurrentClueDto, ClueQuestionDto } from './dto/session-state.dto';
 
 /** States that represent an in-progress (non-terminal) session. */
@@ -382,6 +383,75 @@ export class GameService {
       : 0;
 
     return CLUE_BASE_SCORE + bonus;
+  }
+
+  // ── Final Code Verification (S5-07) ──────────────────────────────────────
+
+  async verifyFinalCode(
+    sessionId: string,
+    dto: VerifyFinalCodeDto,
+    userId: string | null,
+    guestTokenJti: string | null,
+  ): Promise<SessionStateDto> {
+    const session = await this.loadSession(sessionId);
+    this.assertOwnership(session, userId, guestTokenJti);
+    this.assertNotTerminal(session);
+
+    if (session.state !== GameState.FINAL_CODE) {
+      throw new ApiException(
+        'Final code can only be verified after all clues are completed.',
+        ErrorCode.GAME_INVALID_STATE,
+        HttpStatus.CONFLICT,
+      );
+    }
+
+    const settings = session.museum.settings as unknown as MuseumSettings;
+    const maxFinalAttempts = settings?.limits?.maxFinalCodeAttempts ?? 5;
+
+    // Brute-force guard tracked in DB via attemptsOnCurrentClue (reused for final code)
+    if (session.attemptsOnCurrentClue >= maxFinalAttempts) {
+      const expired = await this.prisma.gameSession.update({
+        where: { id: session.id },
+        data: { state: GameState.EXPIRED },
+      });
+      throw new ApiException(
+        'Maximum final code attempts exceeded. Session expired.',
+        ErrorCode.GAME_SESSION_EXPIRED,
+        HttpStatus.GONE,
+      );
+    }
+
+    const isMatch = dto.code.trim().toUpperCase() === session.scenario.finalCode.trim().toUpperCase();
+
+    if (!isMatch) {
+      const newAttempts = session.attemptsOnCurrentClue + 1;
+      await this.prisma.gameSession.update({
+        where: { id: session.id },
+        data: { attemptsOnCurrentClue: newAttempts },
+      });
+      throw new ApiException(
+        'Incorrect final code. Please try again.',
+        ErrorCode.GAME_FINAL_CODE_INVALID,
+        HttpStatus.UNPROCESSABLE_ENTITY,
+      );
+    }
+
+    // Correct final code → COMPLETED
+    const completed = await this.prisma.gameSession.update({
+      where: { id: session.id },
+      data: { state: GameState.COMPLETED, completedAt: new Date() },
+    });
+
+    this.logger.log(
+      `Session ${session.id} COMPLETED. Final score: ${session.score}.`,
+    );
+
+    // Reward issuance will be integrated in Sprint 6 (RewardsModule).
+
+    return this.buildSessionState(
+      { ...session, ...completed, scenario: session.scenario, museum: session.museum },
+      settings,
+    );
   }
 
   // ── Guard helpers ─────────────────────────────────────────────────────────
