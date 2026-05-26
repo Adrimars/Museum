@@ -4,6 +4,7 @@ import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagg
 import { CurrentUser, type JwtPayload } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RewardsService } from '../rewards/rewards.service';
 
 import { AssignRoleDto } from './dto/assign-role.dto';
 import { BanUserDto } from './dto/ban-user.dto';
@@ -16,7 +17,10 @@ import { UsersService } from './users.service';
 @UseGuards(JwtAuthGuard)
 @Controller('users')
 export class UsersController {
-  constructor(private readonly usersService: UsersService) {}
+  constructor(
+    private readonly usersService: UsersService,
+    private readonly rewardsService: RewardsService,
+  ) {}
 
   // ── GET /users (museum_admin own | super_admin all) ─────────────────────
 
@@ -28,6 +32,14 @@ export class UsersController {
   @ApiResponse({ status: 403, description: 'Insufficient role.' })
   findAll(@Query() dto: ListUsersDto, @CurrentUser() actor: JwtPayload) {
     return this.usersService.findAll(dto, actor.role, actor.museumId);
+  }
+
+  // ── GET /me/rewards ──────────────────────────────────────────────────────
+
+  @Get('me/rewards')
+  @ApiOperation({ summary: "List the calling user's earned rewards with asset URLs (S6-07)" })
+  getMyRewards(@CurrentUser() user: JwtPayload) {
+    return this.rewardsService.getUserRewards(user.sub);
   }
 
   // ── GET /me ─────────────────────────────────────────────────────────────
@@ -50,15 +62,16 @@ export class UsersController {
     return this.usersService.updateProfile(user.sub, dto);
   }
 
-  // ── POST /users/:id/ban (super_admin only) ──────────────────────────────
+  // ── POST /users/:id/ban (museum_admin own | super_admin any) ───────────────
+  // S-5: PRD §7.2 grants museum_admin ban rights scoped to their museum
 
   @Post(':id/ban')
   @HttpCode(HttpStatus.OK)
-  @Roles('super_admin')
-  @ApiOperation({ summary: 'Ban a user and revoke all their tokens (super_admin only)' })
+  @Roles('museum_admin', 'super_admin')
+  @ApiOperation({ summary: 'Ban a user and revoke all their tokens (museum_admin: own museum; super_admin: any)' })
   @ApiResponse({ status: 200, description: 'User banned.' })
   @ApiResponse({ status: 400, description: 'User is already banned.' })
-  @ApiResponse({ status: 403, description: 'Insufficient role.' })
+  @ApiResponse({ status: 403, description: 'Insufficient role or wrong museum.' })
   @ApiResponse({ status: 404, description: 'User not found.' })
   banUser(
     @Param('id', ParseUUIDPipe) id: string,
@@ -68,21 +81,22 @@ export class UsersController {
   ) {
     return this.usersService.banUser(
       id,
-      { id: actor.sub, role: actor.role },
+      { id: actor.sub, role: actor.role, museumId: actor.museumId },
       dto,
       req.ip,
     );
   }
 
-  // ── DELETE /users/:id/ban (super_admin only) ─────────────────────────────
+  // ── DELETE /users/:id/ban (museum_admin own | super_admin any) ─────────────
+  // S-5: symmetric unban follows same scope rules as ban
 
   @Delete(':id/ban')
   @HttpCode(HttpStatus.OK)
-  @Roles('super_admin')
-  @ApiOperation({ summary: 'Unban a user (super_admin only)' })
+  @Roles('museum_admin', 'super_admin')
+  @ApiOperation({ summary: 'Unban a user (museum_admin: own museum; super_admin: any)' })
   @ApiResponse({ status: 200, description: 'User unbanned.' })
   @ApiResponse({ status: 400, description: 'User is not banned.' })
-  @ApiResponse({ status: 403, description: 'Insufficient role.' })
+  @ApiResponse({ status: 403, description: 'Insufficient role or wrong museum.' })
   @ApiResponse({ status: 404, description: 'User not found.' })
   unbanUser(
     @Param('id', ParseUUIDPipe) id: string,
@@ -91,26 +105,27 @@ export class UsersController {
   ) {
     return this.usersService.unbanUser(
       id,
-      { id: actor.sub, role: actor.role },
+      { id: actor.sub, role: actor.role, museumId: actor.museumId },
       req.ip,
     );
   }
 
-  // ── PATCH /users/:id/role (super_admin only) ─────────────────────────────
+  // ── PATCH /users/:id/role (museum_admin own | super_admin any) ─────────────
+  // S-6: PRD §7.2 grants museum_admin role-assignment rights scoped to their museum
 
   @Patch(':id/role')
   @HttpCode(HttpStatus.OK)
-  @Roles('super_admin')
-  @ApiOperation({ summary: 'Assign role to a user (super_admin only)' })
+  @Roles('museum_admin', 'super_admin')
+  @ApiOperation({ summary: 'Assign role to a user (museum_admin: content_editor/museum_admin in own museum; super_admin: any)' })
   @ApiResponse({ status: 200, description: 'User role updated.' })
-  @ApiResponse({ status: 400, description: 'museumId required for museum_admin/content_editor, or self-change attempted.' })
-  @ApiResponse({ status: 403, description: 'Insufficient role.' })
+  @ApiResponse({ status: 400, description: 'museumId required, or self-change attempted, or role not allowed for actor.' })
+  @ApiResponse({ status: 403, description: 'Insufficient role or wrong museum.' })
   @ApiResponse({ status: 404, description: 'User or museum not found.' })
   assignRole(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() actor: JwtPayload,
     @Body() dto: AssignRoleDto,
   ) {
-    return this.usersService.assignRole(id, actor.sub, dto);
+    return this.usersService.assignRole(id, actor.sub, actor.role, actor.museumId, dto);
   }
 }

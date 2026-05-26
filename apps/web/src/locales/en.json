@@ -15,6 +15,15 @@
     "noAccount": "Don't have an account?",
     "hasAccount": "Already have an account?"
   },
+  "ai": {
+    "chatTitle": "Museum AI Guide",
+    "connected": "Connected",
+    "connecting": "Connecting...",
+    "startPrompt": "Ask me anything about the museum's artifacts!",
+    "inputPlaceholder": "Type your question...",
+    "send": "Send",
+    "invalidSession": "Invalid chat session."
+  },
   "errors": {
     "required": "This field is required",
     "invalidEmail": "Please enter a valid email address",

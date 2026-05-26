@@ -2,8 +2,8 @@ import { ForbiddenException, Injectable, NestMiddleware, NotFoundException } fro
 import { Request, Response, NextFunction } from 'express';
 
 import { PrismaService } from '../../prisma/prisma.service';
-import { ErrorCode } from '../errors/error-codes';
 import type { JwtPayload } from '../decorators/current-user.decorator';
+import { ErrorCode } from '../errors/error-codes';
 
 export interface TenantRequest extends Request {
   museumId?: string;

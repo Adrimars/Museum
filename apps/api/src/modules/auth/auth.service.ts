@@ -2,10 +2,11 @@ import { createHash, randomBytes } from 'crypto';
 
 import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { UserRole } from '@prisma/client';
+import { JwtService } from '@nestjs/jwt';
+import { Prisma, UserRole } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import Redis from 'ioredis';
-import { createTransport } from 'nodemailer';
+import { createTransport, type Transporter } from 'nodemailer';
 
 import { ErrorCode } from '../../common/errors/error-codes';
 import { ApiException } from '../../common/exceptions/api.exception';
@@ -13,6 +14,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { REDIS_CLIENT } from '../../redis/redis.module';
 
 import type { ForgotPasswordDto } from './dto/forgot-password.dto';
+import type { LinkGuestDto } from './dto/link-guest.dto';
 import type { LoginDto } from './dto/login.dto';
 import type { RegisterDto } from './dto/register.dto';
 import type { ResetPasswordDto } from './dto/reset-password.dto';
@@ -27,13 +29,25 @@ export interface AuthTokens {
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
+  // S-11: singleton transporter — createTransport was being called on every email, creating a new SMTP connection each time
+  private readonly mailer: Transporter;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly tokenService: TokenService,
+    private readonly jwtService: JwtService,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
     private readonly config: ConfigService,
-  ) {}
+  ) {
+    this.mailer = createTransport({
+      host: 'smtp.sendgrid.net',
+      port: 587,
+      auth: {
+        user: 'apikey',
+        pass: this.config.get<string>('auth.sendgridApiKey', ''),
+      },
+    });
+  }
 
   // ── Register ──────────────────────────────────────────────────────────────
 
@@ -53,20 +67,33 @@ export class AuthService {
     const bcryptCost = this.config.get<number>('auth.bcryptCostFactor', 12);
     const passwordHash = await bcrypt.hash(dto.password, bcryptCost);
 
-    const user = await this.prisma.user.create({
-      data: {
-        email: dto.email,
-        passwordHash,
-        displayName: dto.displayName,
-        dateOfBirth: new Date(dto.dateOfBirth),
-        role: UserRole.user,
-        preferences: {
-          language: 'tr',
-          preferredDifficulty: 'medium',
-          accessibility: { reducedMotion: false, highContrast: false },
+    let user: { id: string; role: UserRole; museumId: string | null };
+    try {
+      user = await this.prisma.user.create({
+        data: {
+          email: dto.email,
+          passwordHash,
+          displayName: dto.displayName,
+          dateOfBirth: new Date(dto.dateOfBirth),
+          role: UserRole.user,
+          preferences: {
+            language: 'tr',
+            preferredDifficulty: 'medium',
+            accessibility: { reducedMotion: false, highContrast: false },
+          },
         },
-      },
-    });
+      });
+    } catch (err) {
+      // Concurrent registration with the same email won the race — surface as 409
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        throw new ApiException(
+          'An account with this email already exists.',
+          ErrorCode.AUTH_EMAIL_EXISTS,
+          HttpStatus.CONFLICT,
+        );
+      }
+      throw err;
+    }
 
     return this.buildTokens(user.id, user.role, user.museumId, deviceHint);
   }
@@ -97,6 +124,16 @@ export class AuthService {
       );
     }
 
+    // S-12: ban check before bcrypt.compare — avoids a timing signal where banned users
+    // get a different error only after a successful password hash comparison
+    if (user.isBanned) {
+      throw new ApiException(
+        'Your account has been suspended.',
+        ErrorCode.AUTH_ACCOUNT_BANNED,
+        HttpStatus.FORBIDDEN,
+      );
+    }
+
     const passwordMatch = await bcrypt.compare(dto.password, user.passwordHash);
 
     if (!passwordMatch) {
@@ -105,14 +142,6 @@ export class AuthService {
         'Invalid email or password.',
         ErrorCode.AUTH_INVALID_CREDENTIALS,
         HttpStatus.UNAUTHORIZED,
-      );
-    }
-
-    if (user.isBanned) {
-      throw new ApiException(
-        'Your account has been suspended.',
-        ErrorCode.AUTH_ACCOUNT_BANNED,
-        HttpStatus.FORBIDDEN,
       );
     }
 
@@ -219,7 +248,26 @@ export class AuthService {
       );
     }
 
-    const { userId } = JSON.parse(stored) as { userId: string };
+    let parsed: { userId?: unknown };
+    try {
+      parsed = JSON.parse(stored) as { userId?: unknown };
+    } catch {
+      throw new ApiException(
+        'Password reset token is invalid or has expired.',
+        ErrorCode.AUTH_RESET_TOKEN_INVALID,
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    if (!parsed.userId || typeof parsed.userId !== 'string') {
+      throw new ApiException(
+        'Password reset token is invalid or has expired.',
+        ErrorCode.AUTH_RESET_TOKEN_INVALID,
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const { userId } = parsed as { userId: string };
     const bcryptCost = this.config.get<number>('auth.bcryptCostFactor', 12);
     const passwordHash = await bcrypt.hash(dto.newPassword, bcryptCost);
 
@@ -335,19 +383,10 @@ export class AuthService {
   }
 
   private async sendPasswordResetEmail(to: string, resetLink: string): Promise<void> {
-    const sendgridKey = this.config.get<string>('auth.sendgridApiKey', '');
     const fromEmail = this.config.get<string>('auth.fromEmail', 'noreply@museumquest.app');
 
-    const transporter = createTransport({
-      host: 'smtp.sendgrid.net',
-      port: 587,
-      auth: {
-        user: 'apikey',
-        pass: sendgridKey,
-      },
-    });
-
-    await transporter.sendMail({
+    // S-11: use singleton this.mailer instead of creating a new transporter per call
+    await this.mailer.sendMail({
       from: fromEmail,
       to,
       subject: 'MuseumQuest — Reset your password',
@@ -358,5 +397,38 @@ export class AuthService {
         <p>If you did not request this, you can safely ignore this email.</p>
       `,
     });
+  }
+
+  // ── Guest-to-Account Linking (S6-10) ──────────────────────────────────────
+
+  async linkGuestSession(
+    dto: LinkGuestDto,
+    userId: string,
+  ): Promise<{ linkedSessions: number }> {
+    // Verify the guest JWT and extract its jti
+    let guestJti: string;
+    try {
+      const payload = this.jwtService.verify<{ jti?: string; role?: string }>(dto.guestToken);
+      if (payload.role !== 'guest' || !payload.jti) {
+        throw new Error('Not a guest token');
+      }
+      guestJti = payload.jti;
+    } catch {
+      throw new ApiException(
+        'Invalid or expired guest token.',
+        ErrorCode.AUTH_TOKEN_INVALID,
+        HttpStatus.UNPROCESSABLE_ENTITY,
+      );
+    }
+
+    // Transfer all unowned game sessions with this guest JTI to the authenticated user
+    const result = await this.prisma.gameSession.updateMany({
+      where: { guestTokenJti: guestJti, userId: null },
+      data: { userId },
+    });
+
+    this.logger.log(`Guest session linked: guestJti=${guestJti} → userId=${userId} (${result.count} sessions)`);
+
+    return { linkedSessions: result.count };
   }
 }
