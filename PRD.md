@@ -1153,7 +1153,7 @@ The `requestId` field enables log correlation between frontend error reports and
 | Build Tool | Vite | Fast HMR, optimized bundling |
 | Charts | Recharts | Admin dashboard charting |
 | Data Tables | TanStack Table v8 | Virtualized, sortable, filterable admin tables |
-| PWA | Vite PWA Plugin | Manifest, install prompt. (Offline caching deferred to Phase 2.) |
+| PWA | Vite PWA Plugin | Manifest, install prompt, Service Worker for static-asset caching (app shell, core images) at launch. Full offline-first gameplay deferred to Phase 2. |
 
 ### 11.2 Backend
 
@@ -1796,8 +1796,7 @@ The following features, integrations, and capabilities are **NOT included in v1.
 | Automated weekly email recaps | Phase 2+ |
 | Notification broadcast targeting | Phase 2+ |
 | Push notification infrastructure (Web Push API, service worker push, `push_subscription` field) | Phase 2+ |
-| Offline mode / Service Worker caching / Background sync | Phase 2+ |
-| Full offline-first gameplay | Phase 2+ |
+| Full offline-first gameplay / Background sync | Phase 2+ |
 | Billing system / SaaS subscription management UI | Phase 2+ |
 | Row-Level Security (RLS) in PostgreSQL | Phase 2 (hardening) |
 | 2FA / MFA for admin roles | Phase 2 |

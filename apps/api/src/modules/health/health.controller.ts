@@ -2,8 +2,8 @@ import { Controller, Get, Inject } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import Redis from 'ioredis';
 
-import { REDIS_CLIENT } from '../../redis/redis.module';
 import { PrismaService } from '../../prisma/prisma.service';
+import { REDIS_CLIENT } from '../../redis/redis.module';
 
 @ApiTags('Health')
 @Controller({ path: 'health', version: [] })
