@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 
 import { ErrorCode } from '../../common/errors/error-codes';
@@ -150,15 +150,40 @@ export class UsersService {
     });
   }
 
-  // ── PATCH /users/:id/role (super_admin only) ─────────────────────────────
+  // ── PATCH /users/:id/role (museum_admin own | super_admin any) ─────────────
 
-  async assignRole(targetId: string, actorId: string, dto: AssignRoleDto) {
+  async assignRole(
+    targetId: string,
+    actorId: string,
+    // S-6: actor role + museumId required so we can enforce museum_admin scope
+    actorRole: string,
+    actorMuseumId: string | null,
+    dto: AssignRoleDto,
+  ) {
     // Prevent self-role changes to avoid accidental lockout
     if (targetId === actorId) {
       throw new BadRequestException({
         message: 'You cannot change your own role.',
         errorCode: ErrorCode.USER_ROLE_ESCALATION_FORBIDDEN,
       });
+    }
+
+    // S-6: museum_admin may only assign museum_admin or content_editor (per PRD §7.2 + Design Query 6.1)
+    if (actorRole === 'museum_admin') {
+      const allowedRoles: string[] = ['museum_admin', 'content_editor'];
+      if (!allowedRoles.includes(dto.role)) {
+        throw new ForbiddenException({
+          message: `museum_admin can only assign the roles: ${allowedRoles.join(', ')}.`,
+          errorCode: ErrorCode.FORBIDDEN,
+        });
+      }
+      // museum_admin must target their own museum and cannot omit museumId
+      if (!dto.museumId || dto.museumId !== actorMuseumId) {
+        throw new ForbiddenException({
+          message: 'You can only assign roles within your own museum.',
+          errorCode: ErrorCode.FORBIDDEN,
+        });
+      }
     }
 
     const target = await this.prisma.user.findFirst({
@@ -211,19 +236,28 @@ export class UsersService {
 
   async banUser(
     targetId: string,
-    actor: { id: string; role: string },
+    // S-5: actor now carries museumId so museum_admin scope can be enforced
+    actor: { id: string; role: string; museumId?: string | null },
     dto: BanUserDto,
     ipAddress: string,
   ) {
     const target = await this.prisma.user.findFirst({
       where: { id: targetId, deletedAt: null },
-      select: { id: true, isBanned: true },
+      select: { id: true, isBanned: true, museumId: true },
     });
 
     if (!target) {
       throw new NotFoundException({
         message: 'User not found.',
         errorCode: ErrorCode.USER_NOT_FOUND,
+      });
+    }
+
+    // S-5: museum_admin may only ban users who belong to their own museum
+    if (actor.role === 'museum_admin' && target.museumId !== actor.museumId) {
+      throw new ForbiddenException({
+        message: 'You can only ban users within your own museum.',
+        errorCode: ErrorCode.FORBIDDEN,
       });
     }
 
@@ -264,18 +298,27 @@ export class UsersService {
 
   async unbanUser(
     targetId: string,
-    actor: { id: string; role: string },
+    // S-5: symmetric scope check for unban
+    actor: { id: string; role: string; museumId?: string | null },
     ipAddress: string,
   ) {
     const target = await this.prisma.user.findFirst({
       where: { id: targetId, deletedAt: null },
-      select: { id: true, isBanned: true },
+      select: { id: true, isBanned: true, museumId: true },
     });
 
     if (!target) {
       throw new NotFoundException({
         message: 'User not found.',
         errorCode: ErrorCode.USER_NOT_FOUND,
+      });
+    }
+
+    // S-5: museum_admin may only unban users who belong to their own museum
+    if (actor.role === 'museum_admin' && target.museumId !== actor.museumId) {
+      throw new ForbiddenException({
+        message: 'You can only unban users within your own museum.',
+        errorCode: ErrorCode.FORBIDDEN,
       });
     }
 

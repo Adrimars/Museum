@@ -360,7 +360,11 @@ Respond in the same language the visitor uses. Keep responses under 300 words un
       client.emit('ai:typing_end', { content: fullResponse });
       this.logger.log(`AI stream complete: session=${sessionId} tokens=${outputTokens}`);
 
-      this.analyticsService.emit('ai_message_sent', session.museumId, user.sub, { sessionId });
+      // S-14: include artifactId so heatmap can weight AI interactions per artifact
+      this.analyticsService.emit('ai_message_sent', session.museumId, user.sub, {
+        sessionId,
+        artifactId: session.artifactContextId ?? undefined,
+      });
       this.analyticsService.emit('ai_response_received', session.museumId, user.sub, {
         sessionId,
         tokensUsed: outputTokens,

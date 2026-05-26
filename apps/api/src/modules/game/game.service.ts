@@ -57,7 +57,8 @@ type SessionRow = {
   completedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
-  scenario: { storyIntro: string; clues: unknown; finalCode: string; rewardId: string | null };
+  // S-7: finalCode is optional — stripped from Redis cache, fetched from DB in verifyFinalCode
+  scenario: { storyIntro: string; clues: unknown; finalCode?: string; rewardId: string | null };
   museum: { settings: unknown };
 };
 
@@ -434,7 +435,12 @@ export class GameService {
       );
     }
 
-    const isMatch = dto.code.trim().toUpperCase() === session.scenario.finalCode.trim().toUpperCase();
+    // S-7: always load finalCode from Postgres — never trust the Redis-cached value
+    const dbScenario = await this.prisma.gameScenario.findFirst({
+      where: { id: session.scenarioId },
+      select: { finalCode: true },
+    });
+    const isMatch = dto.code.trim().toUpperCase() === (dbScenario?.finalCode ?? '').trim().toUpperCase();
 
     if (!isMatch) {
       const newAttempts = session.attemptsOnCurrentClue + 1;
@@ -588,9 +594,13 @@ export class GameService {
     const elapsedMs = Date.now() - new Date(session.createdAt).getTime();
     const remainingSec = Math.max(1, Math.ceil((timeoutMs - elapsedMs) / 1000));
 
+    // S-7: strip finalCode before writing to Redis — a cache breach must not expose game codes
+    const { scenario: { finalCode: _stripped, ...scenarioWithoutCode }, ...rest } = session;
+    const cacheable = { ...rest, scenario: scenarioWithoutCode };
+
     await this.redis.set(
       this.sessionCacheKey(session.id),
-      JSON.stringify(session),
+      JSON.stringify(cacheable),
       'EX',
       remainingSec,
     );
@@ -712,6 +722,16 @@ export class GameService {
     }
 
     const isAdmin = ['museum_admin', 'content_editor', 'super_admin'].includes(actor.role);
+
+    // S-2: non-super_admin actors must belong to the same museum (tenant isolation)
+    if (isAdmin && actor.role !== 'super_admin' && scenario.museumId !== actor.museumId) {
+      throw new ApiException(
+        'Game scenario not found.',
+        ErrorCode.GAME_SCENARIO_NOT_FOUND,
+        HttpStatus.NOT_FOUND,
+      );
+    }
+
     if (!isAdmin && scenario.status !== ContentStatus.published) {
       throw new ApiException(
         'Game scenario not found.',
@@ -724,16 +744,17 @@ export class GameService {
   }
 
   async createScenario(dto: CreateScenarioDto, actor: JwtPayload, ip: string) {
-    const museumId = actor.role === 'super_admin' ? undefined : (actor.museumId ?? undefined);
-    if (!museumId && actor.role !== 'super_admin') {
+    // S-1: super_admin must pass museumId in the body; other roles inherit from their JWT
+    const resolvedMuseumId =
+      actor.role === 'super_admin' ? dto.museumId : (actor.museumId ?? undefined);
+
+    if (!resolvedMuseumId) {
       throw new ApiException(
-        'Museum context required to create a scenario.',
+        'museumId is required to create a scenario.',
         ErrorCode.MUSEUM_NOT_FOUND,
         HttpStatus.BAD_REQUEST,
       );
     }
-
-    const resolvedMuseumId = museumId!;
 
     const scenario = await this.prisma.gameScenario.create({
       data: {

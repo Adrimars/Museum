@@ -82,6 +82,15 @@ export class AiGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
 
+    // S-8: re-check access-token expiry on every message — the JWT verified at connect
+    // time (15 min TTL) may have expired mid-conversation; without this check an
+    // invalidated token could continue sending messages until the socket drops
+    if (user.exp && Math.floor(Date.now() / 1000) > user.exp) {
+      client.emit('ai:error', { errorCode: ErrorCode.AUTH_TOKEN_INVALID, message: 'Access token expired. Please reconnect.' });
+      client.disconnect();
+      return;
+    }
+
     const { sessionId, message } = payload;
 
     if (!sessionId || typeof sessionId !== 'string') {

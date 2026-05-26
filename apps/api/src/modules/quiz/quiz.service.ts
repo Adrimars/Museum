@@ -82,8 +82,12 @@ export class QuizService {
       );
     }
 
-    // Fisher-Yates shuffle, then take N
-    const shuffled = [...allQuestions].sort(() => Math.random() - 0.5);
+    // S-13: proper Fisher-Yates O(n) shuffle — Array.sort(Math.random) produces a biased distribution
+    const shuffled = [...allQuestions];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j]!, shuffled[i]!];
+    }
     const selected = shuffled.slice(0, Math.min(questionCount, shuffled.length));
     const questionIds = selected.map((q) => q.id);
 
@@ -465,27 +469,32 @@ export class QuizService {
     limit: number,
     period: string,
   ): Promise<LeaderboardResponseDto> {
-    const view =
-      period === 'weekly' ? 'quiz_leaderboard_weekly' : 'quiz_leaderboard_monthly';
-    const windowInterval = period === 'weekly' ? '7 days' : '30 days';
-
     type AggRow = { user_id: string; best_score: bigint | number; display_name: string; avatar_url: string | null };
 
-    const rows = await this.prisma.$queryRawUnsafe<AggRow[]>(
-      `SELECT
-         agg.user_id,
-         agg.best_score,
-         u.display_name,
-         u.avatar_url
-       FROM ${view} agg
-       JOIN users u ON u.id = agg.user_id
-       WHERE agg.museum_id = $1::uuid
-         AND agg.bucket >= NOW() - INTERVAL '${windowInterval}'
-       ORDER BY agg.best_score DESC
-       LIMIT $2`,
-      museumId,
-      limit,
-    );
+    // S-9: replace $queryRawUnsafe (string-interpolated table name) with separate
+    // $queryRaw tagged-template calls — Prisma parameterizes $1/$2 safely
+    let rows: AggRow[];
+    if (period === 'weekly') {
+      rows = await this.prisma.$queryRaw<AggRow[]>`
+        SELECT agg.user_id, agg.best_score, u.display_name, u.avatar_url
+        FROM quiz_leaderboard_weekly agg
+        JOIN users u ON u.id = agg.user_id
+        WHERE agg.museum_id = ${museumId}::uuid
+          AND agg.bucket >= NOW() - INTERVAL '7 days'
+        ORDER BY agg.best_score DESC
+        LIMIT ${limit}
+      `;
+    } else {
+      rows = await this.prisma.$queryRaw<AggRow[]>`
+        SELECT agg.user_id, agg.best_score, u.display_name, u.avatar_url
+        FROM quiz_leaderboard_monthly agg
+        JOIN users u ON u.id = agg.user_id
+        WHERE agg.museum_id = ${museumId}::uuid
+          AND agg.bucket >= NOW() - INTERVAL '30 days'
+        ORDER BY agg.best_score DESC
+        LIMIT ${limit}
+      `;
+    }
 
     const entries = rows.map((row, idx) => ({
       rank: idx + 1,
@@ -553,6 +562,9 @@ export class QuizService {
       throw new ApiException('Question not found.', ErrorCode.QUIZ_INVALID_QUESTION, HttpStatus.NOT_FOUND);
     }
 
+    // S-3: enforce museum scope for ALL non-super_admin roles, not just content_editor
+    this.assertQuestionMuseumScope(user, question.museumId);
+
     // content_editor cannot change status to published
     if (
       dto.status === 'published' &&
@@ -585,14 +597,27 @@ export class QuizService {
     if (!question) {
       throw new ApiException('Question not found.', ErrorCode.QUIZ_INVALID_QUESTION, HttpStatus.NOT_FOUND);
     }
-    if (user.role === 'content_editor' && user.museumId !== question.museumId) {
-      throw new ApiException('Forbidden: wrong museum.', ErrorCode.FORBIDDEN, HttpStatus.FORBIDDEN);
-    }
+
+    // S-3: replaces the content_editor-only check — museum_admin from another museum was not guarded
+    this.assertQuestionMuseumScope(user, question.museumId);
+
     await this.prisma.quizQuestion.update({
       where: { id },
       data: { deletedAt: new Date() },
     });
     return { deleted: true };
+  }
+
+  // S-3: centralised tenant guard for quiz question mutations
+  private assertQuestionMuseumScope(actor: JwtPayload, questionMuseumId: string): void {
+    if (actor.role === 'super_admin') return;
+    if (actor.museumId !== questionMuseumId) {
+      throw new ApiException(
+        'Forbidden: question belongs to a different museum.',
+        ErrorCode.FORBIDDEN,
+        HttpStatus.FORBIDDEN,
+      );
+    }
   }
 
   async getSessionCache(sessionId: string): Promise<QuizSessionCache> {

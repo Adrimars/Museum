@@ -6,7 +6,7 @@ import { JwtService } from '@nestjs/jwt';
 import { Prisma, UserRole } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import Redis from 'ioredis';
-import { createTransport } from 'nodemailer';
+import { createTransport, type Transporter } from 'nodemailer';
 
 import { ErrorCode } from '../../common/errors/error-codes';
 import { ApiException } from '../../common/exceptions/api.exception';
@@ -29,6 +29,8 @@ export interface AuthTokens {
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
+  // S-11: singleton transporter — createTransport was being called on every email, creating a new SMTP connection each time
+  private readonly mailer: Transporter;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -36,7 +38,16 @@ export class AuthService {
     private readonly jwtService: JwtService,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
     private readonly config: ConfigService,
-  ) {}
+  ) {
+    this.mailer = createTransport({
+      host: 'smtp.sendgrid.net',
+      port: 587,
+      auth: {
+        user: 'apikey',
+        pass: this.config.get<string>('auth.sendgridApiKey', ''),
+      },
+    });
+  }
 
   // ── Register ──────────────────────────────────────────────────────────────
 
@@ -113,6 +124,16 @@ export class AuthService {
       );
     }
 
+    // S-12: ban check before bcrypt.compare — avoids a timing signal where banned users
+    // get a different error only after a successful password hash comparison
+    if (user.isBanned) {
+      throw new ApiException(
+        'Your account has been suspended.',
+        ErrorCode.AUTH_ACCOUNT_BANNED,
+        HttpStatus.FORBIDDEN,
+      );
+    }
+
     const passwordMatch = await bcrypt.compare(dto.password, user.passwordHash);
 
     if (!passwordMatch) {
@@ -121,14 +142,6 @@ export class AuthService {
         'Invalid email or password.',
         ErrorCode.AUTH_INVALID_CREDENTIALS,
         HttpStatus.UNAUTHORIZED,
-      );
-    }
-
-    if (user.isBanned) {
-      throw new ApiException(
-        'Your account has been suspended.',
-        ErrorCode.AUTH_ACCOUNT_BANNED,
-        HttpStatus.FORBIDDEN,
       );
     }
 
@@ -370,19 +383,10 @@ export class AuthService {
   }
 
   private async sendPasswordResetEmail(to: string, resetLink: string): Promise<void> {
-    const sendgridKey = this.config.get<string>('auth.sendgridApiKey', '');
     const fromEmail = this.config.get<string>('auth.fromEmail', 'noreply@museumquest.app');
 
-    const transporter = createTransport({
-      host: 'smtp.sendgrid.net',
-      port: 587,
-      auth: {
-        user: 'apikey',
-        pass: sendgridKey,
-      },
-    });
-
-    await transporter.sendMail({
+    // S-11: use singleton this.mailer instead of creating a new transporter per call
+    await this.mailer.sendMail({
       from: fromEmail,
       to,
       subject: 'MuseumQuest — Reset your password',

@@ -95,4 +95,10 @@ export class CreateScenarioDto {
   @IsOptional()
   @IsUUID()
   rewardId?: string;
+
+  // S-1: super_admin must supply museumId explicitly (non-admins inherit from JWT)
+  @ApiPropertyOptional({ description: 'Required when the actor is super_admin' })
+  @IsOptional()
+  @IsUUID()
+  museumId?: string;
 }

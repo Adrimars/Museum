@@ -1,5 +1,5 @@
 import { HttpStatus, Injectable, Logger } from '@nestjs/common';
-import { RewardType } from '@prisma/client';
+import { Prisma, RewardType } from '@prisma/client';
 import * as crypto from 'crypto';
 
 import { ErrorCode } from '../../common/errors/error-codes';
@@ -83,44 +83,45 @@ export class RewardsService {
       throw new ApiException('Reward not found.', ErrorCode.REWARD_NOT_FOUND, HttpStatus.NOT_FOUND);
     }
 
-    // Prevent duplicate issuance — unique constraint on (userId, rewardId)
-    const existing = await this.prisma.userReward.findFirst({
-      where: { userId: dto.userId, rewardId: dto.rewardId },
-    });
-    if (existing) {
-      throw new ApiException(
-        'Reward already issued to this user.',
-        ErrorCode.REWARD_ALREADY_ISSUED,
-        HttpStatus.CONFLICT,
-      );
-    }
-
-    // Generate discount code if applicable (S6-08)
+    // Generate discount code if applicable (S6-08) — done before the create so we don't
+    // hold a half-written row on collision
     let discountCode: string | null = null;
     if (reward.type === RewardType.discount_code) {
       discountCode = await this.generateUniqueDiscountCode();
     }
 
-    // Compute expiry if applicable
-    let expiresAt: Date | null = null;
-    if (reward.discountValidityDays) {
-      expiresAt = new Date();
-      expiresAt.setDate(expiresAt.getDate() + reward.discountValidityDays);
+    const expiresAt = reward.discountValidityDays
+      ? new Date(Date.now() + reward.discountValidityDays * 86_400_000)
+      : null;
+
+    try {
+      // S-4: removed pre-flight findFirst + separate create (TOCTOU window).
+      // The DB unique constraint @@unique([userId, rewardId]) is the single source of truth;
+      // concurrent requests both racing past a findFirst check would produce an unhandled 500.
+      const userReward = await this.prisma.userReward.create({
+        data: {
+          userId: dto.userId,
+          rewardId: dto.rewardId,
+          discountCode,
+          isRedeemed: false,
+          earnedVia: (dto.earnedVia ?? {}) as object,
+          expiresAt,
+        },
+      });
+
+      this.logger.log(`Reward issued: rewardId=${dto.rewardId} userId=${dto.userId} type=${reward.type}`);
+      return { userRewardId: userReward.id, discountCode };
+    } catch (err) {
+      // S-4: P2002 = unique violation — race-safe duplicate detection returns clean 409
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        throw new ApiException(
+          'Reward already issued to this user.',
+          ErrorCode.REWARD_ALREADY_ISSUED,
+          HttpStatus.CONFLICT,
+        );
+      }
+      throw err;
     }
-
-    const userReward = await this.prisma.userReward.create({
-      data: {
-        userId: dto.userId,
-        rewardId: dto.rewardId,
-        discountCode,
-        isRedeemed: false,
-        earnedVia: (dto.earnedVia ?? {}) as object,
-        expiresAt,
-      },
-    });
-
-    this.logger.log(`Reward issued: rewardId=${dto.rewardId} userId=${dto.userId} type=${reward.type}`);
-    return { userRewardId: userReward.id, discountCode };
   }
 
   // ── Discount Code Verification (S6-09) ────────────────────────────────────
